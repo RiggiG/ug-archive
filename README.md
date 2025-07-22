@@ -1,5 +1,7 @@
 # Ultimate Guitar Archive Scraper
 
+This is hastily made, not particularly high quality, and Claude-4 stained. Not looking to win any awards, just looking to preserve the tabs. 
+
 A Python-based web scraper for Ultimate Guitar that extracts tabs, artist information, and metadata using Selenium WebDriver. The scraper supports both mobile site scraping and flexible download modes for comprehensive tab archiving.
 
 ## Features
@@ -121,7 +123,7 @@ python main.py --download-only --local-files-dir ./tabs --tab-types CRD --includ
 python main.py --scrape-only --max-bands 2 --starting-letter a --end-letter a
 
 # 2. Download test with filtering
-python main.py --download-only --local-files-dir ./tabs --max-tabs-per-band 3 --tab-types CRD TAB
+python main.py --download-only --max-tabs-per-band 3 --tab-types CRD TAB
 ```
 
 #### Production Workflow
@@ -257,7 +259,7 @@ Binary files with appropriate extensions (.gp4, .gp5, .gp6, .gp7, .ptb, .tg) det
 
 1. **ChromeDriver not found**
    - Ensure ChromeDriver is installed and in your PATH
-   - Download from: https://chromedriver.chromium.org/
+   - Download from: [https://chromedriver.chromium.org/](https://googlechromelabs.github.io/chrome-for-testing/)
 
 2. **JavaScript not loading**
    - Script includes automatic retries with additional wait time
@@ -277,16 +279,3 @@ Binary files with appropriate extensions (.gp4, .gp5, .gp6, .gp7, .ptb, .tg) det
 1. **Use scrape-then-download workflow** for large collections
 2. **Filter by tab types** to reduce download volume
 3. **Limit scope** with max-bands/max-tabs-per-band for testing
-4. **Monitor disk space** - tabs can accumulate quickly
-
-## Legal Notice
-
-This tool is for educational and archival purposes. Please respect Ultimate Guitar's terms of service and consider supporting the platform and artists by using their official services.
-
-## Contributing
-
-Feel free to submit issues and enhancement requests. When contributing code, please ensure compatibility with the existing command-line interface and maintain the flexible operating mode structure.
-
-## Legal Considerations
-
-This tool is for educational and personal use. Please respect Ultimate Guitar's terms of service and use responsibly. Consider supporting artists and Ultimate Guitar if you find their content valuable.
