@@ -39,5 +39,5 @@ wget -q -O chromedriver-linux64.zip https://storage.googleapis.com/chrome-for-te
     mv chromedriver /usr/bin/
     
 python3 -m venv ./venv
-
-./venv/bin/pip install --no-cache-dir -r requirements.txt
+source ./venv/bin/activate
+pip install --no-cache-dir -r requirements.txt

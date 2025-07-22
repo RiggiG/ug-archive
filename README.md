@@ -29,12 +29,31 @@ Scrapes tabs from ultimate-guitar.com using Selenium WebDriver to handle JavaScr
 ## Environment Setup
 
 ### Virtual Environment
+
+#### Linux - Script
+```bash
+./setup-env.sh
+```
+
+#### Linux - Manual
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-# Install Chrome/Chromium and ChromeDriver for your system
+# Install Chrome/Chromium and ChromeDriver for your system, and all the prereqs listed in `setup-env.sh`
 ```
+
+#### Windows
+==I'm pretty sure these steps are right, good luck==
+You'll need to install [Chrome/Chromium + ChromeDriver](https://googlechromelabs.github.io/chrome-for-testing/#stable)
+and ensure they are in your PATH.
+Highly recommend the use of a venv, so still:
+```powershell
+python3 -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
+
 
 ### Docker Container
 ```bash
