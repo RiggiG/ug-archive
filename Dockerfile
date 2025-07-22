@@ -13,14 +13,12 @@ ENV RUNNING_IN_CONTAINER=true
 WORKDIR /app
 
 # Install system dependencies
-RUN snap install chromium
+RUN apt-get update
 RUN apt-get update && apt-get install -y \
     # Python and pip
     python3 \
     python3-pip \
     python3-venv \
-    # Chromium and dependencies
-    chromium-chromedriver \
     # Additional dependencies for Chromium
     fonts-liberation \
     libasound2t64 \
@@ -50,8 +48,22 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
+
+# Download chromium
+RUN wget -q -O chrome-linux64.zip https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.157/linux64/chrome-linux64.zip && \
+    unzip chrome-linux64.zip && \
+    rm chrome-linux64.zip && \
+    mv chrome-linux64 /opt/chrome/ && \
+    ln -sf /opt/chrome/chrome /usr/bin/chromium
+# Download chromedriver
+RUN wget -q -O chromedriver-linux64.zip https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.157/linux64/chromedriver-linux64.zip && \
+    unzip -j chromedriver-linux64.zip chromedriver-linux64/chromedriver && \
+    rm chromedriver-linux64.zip && \
+    mv chromedriver /usr/bin/
+
 # Create symbolic link for chromium-browser to chrome (for compatibility)
-RUN ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome
+RUN ln -sf /usr/bin/chromium /usr/bin/chromium-browser
+RUN ln -sf /usr/bin/chromium /usr/bin/google-chrome
 
 # Create Python virtual environment
 RUN python3 -m venv /app/venv
