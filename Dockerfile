@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
     chromium-chromedriver \
     # Additional dependencies for Chromium
     fonts-liberation \
-    libasound2 \
+    libasound2t64 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libatspi2.0-0 \
@@ -53,11 +53,14 @@ RUN apt-get update && apt-get install -y \
 # Create symbolic link for chromium-browser to chrome (for compatibility)
 RUN ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome
 
+# Create Python virtual environment
+RUN python3 -m venv /app/venv
+
 # Copy requirements file first (for better Docker layer caching)
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Install Python dependencies in virtual environment
+RUN /app/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Copy the main application
 COPY main.py .
@@ -71,12 +74,13 @@ RUN useradd -m -u 1000 scraper && \
     chown -R scraper:scraper /app
 USER scraper
 
-# Set up environment for Chrome/Chromium
+# Set up environment for Chrome/Chromium and Python venv
 ENV CHROME_BIN=/usr/bin/chromium-browser
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+ENV PATH="/app/venv/bin:$PATH"
 
 # Default command
-CMD ["python3", "main.py", "--help"]
+CMD ["/app/venv/bin/python", "main.py", "--help"]
 
 # Expose volume for output
 VOLUME ["/app/output"]
