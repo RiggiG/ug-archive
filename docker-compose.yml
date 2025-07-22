@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  ultimate-guitar-scraper:
+    build: .
+    container_name: ug-scraper
+    volumes:
+      # Mount host directory for output
+      - ./output:/app/output
+      # Optional: Mount custom config or input files
+      - ./tabs:/app/tabs:ro  # Read-only mount for existing scraped data
+    environment:
+      # Set timezone
+      - TZ=UTC
+      # Chrome/Chromium specific environment variables
+      - DISPLAY=:99
+      - CHROME_NO_SANDBOX=true
+      # Container runtime flag
+      - RUNNING_IN_CONTAINER=true
+    # Example commands (uncomment one to use):
+    
+    # Scrape-only mode (metadata collection)
+    # command: ["python3", "main.py", "--scrape-only", "--max-bands", "5", "--outdir", "/app/output"]
+    
+    # Download-only mode (using existing data)
+    # command: ["python3", "main.py", "--download-only", "--local-files-dir", "/app/tabs", "--outdir", "/app/output", "--max-tabs-per-band", "10", "--tab-types", "CRD", "TAB"]
+    
+    # Full scraping mode (limited for testing)
+    command: ["python3", "main.py", "--max-bands", "2", "--max-tabs-per-band", "5", "--starting-letter", "a", "--end-letter", "a", "--outdir", "/app/output"]
+    
+    # Show help
+    # command: ["python3", "main.py", "--help"]
