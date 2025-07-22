@@ -2,7 +2,10 @@ version: '3.8'
 
 services:
   ultimate-guitar-scraper:
-    build: .
+    build: 
+      context: .
+      args:
+        USER_UID: ${USER_UID:-1000}  # Use host user UID or default to 1000
     container_name: ug-scraper
     volumes:
       # Mount host directory for output

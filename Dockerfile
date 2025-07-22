@@ -13,7 +13,6 @@ ENV RUNNING_IN_CONTAINER=true
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update
 RUN apt-get update && apt-get install -y \
     # Python and pip
     python3 \
@@ -82,7 +81,13 @@ COPY README.md .
 RUN mkdir -p /app/output
 
 # Create a non-root user for security
-RUN useradd -m -u 1234 scraper && \
+# Accept UID as build argument, default to 1000
+ARG USER_UID=1000
+# Replace 24.04 new default ubuntu user and set custom UID
+RUN usermod -u ${USER_UID} ubuntu && \
+    usermod -l scraper ubuntu && \
+    groupmod -n scraper ubuntu && \
+    usermod -d /home/scraper -m scraper && \
     chown -R scraper:scraper /app
 USER scraper
 

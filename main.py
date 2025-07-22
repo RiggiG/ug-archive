@@ -169,21 +169,33 @@ class SeleniumSession:
     chrome_options.add_argument("--user-agent=" + self.user_agent)
     chrome_options.add_argument("--window-size=915,412")  # Mobile viewport, landscape
     
+    # Essential Docker/container options - always apply these in containers
+    if os.environ.get('RUNNING_IN_CONTAINER'):
+      # Core container options
+      chrome_options.add_argument("--no-sandbox")
+      chrome_options.add_argument("--disable-dev-shm-usage")
+      chrome_options.add_argument("--disable-gpu")
+      chrome_options.add_argument("--disable-software-rasterizer")
+      chrome_options.add_argument("--disable-background-timer-throttling")
+      chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+      chrome_options.add_argument("--disable-renderer-backgrounding")
+      chrome_options.add_argument("--disable-features=TranslateUI")
+      chrome_options.add_argument("--disable-ipc-flooding-protection")
+      chrome_options.add_argument("--no-zygote")
+      chrome_options.add_argument("--single-process")
+      chrome_options.add_argument("--remote-debugging-port=9222")
+      chrome_options.add_argument("--disable-web-security")
+      chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+    else:
+      # Non-container options
+      chrome_options.add_argument("--no-sandbox")
+      chrome_options.add_argument("--disable-dev-shm-usage")
+      chrome_options.add_argument("--disable-gpu")
+    
     # Performance and stability options
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-extensions")
     chrome_options.add_argument("--disable-plugins")
     chrome_options.add_argument("--disable-images")  # Speed up loading
-    
-    # Container-specific options (only if running in container)
-    if os.environ.get('RUNNING_IN_CONTAINER'):
-      chrome_options.add_argument("--disable-web-security")
-      chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-      chrome_options.add_argument("--remote-debugging-port=9222")
-      chrome_options.add_argument("--no-zygote")
-      chrome_options.add_argument("--single-process")
     
     # Enable JavaScript execution
     chrome_options.add_argument("--enable-javascript")
@@ -199,20 +211,50 @@ class SeleniumSession:
       chrome_options.binary_location = chrome_binary
     
     try:
+      # Debug logging for container mode
+      if os.environ.get('RUNNING_IN_CONTAINER'):
+        print("Running in container mode - additional Chrome options applied")
+        print(f"Chrome binary: {chrome_options.binary_location}")
+        print(f"Chrome arguments: {chrome_options.arguments}")
+      
       # Try to use system ChromeDriver first
       chromedriver_path = os.environ.get('CHROMEDRIVER_PATH')
       if chromedriver_path and os.path.exists(chromedriver_path):
+        print(f"Using ChromeDriver at: {chromedriver_path}")
         from selenium.webdriver.chrome.service import Service
         service = Service(chromedriver_path)
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
       else:
+        print("Using default ChromeDriver from PATH")
         self.driver = webdriver.Chrome(options=chrome_options)
       
       self.driver.implicitly_wait(10)  # 10 second implicit wait
+      print("WebDriver initialized successfully")
     except Exception as e:
       print(f"Error setting up Chrome driver: {e}")
       print("Make sure ChromeDriver is installed and in PATH")
       print("For containers, ensure CHROME_BIN and CHROMEDRIVER_PATH are set correctly")
+      
+      # Additional debugging for container mode
+      if os.environ.get('RUNNING_IN_CONTAINER'):
+        print("\nContainer debugging info:")
+        print(f"  RUNNING_IN_CONTAINER: {os.environ.get('RUNNING_IN_CONTAINER')}")
+        print(f"  CHROME_BIN: {os.environ.get('CHROME_BIN')}")
+        print(f"  CHROMEDRIVER_PATH: {os.environ.get('CHROMEDRIVER_PATH')}")
+        print(f"  Chrome binary exists: {os.path.exists(os.environ.get('CHROME_BIN', ''))}")
+        print(f"  ChromeDriver exists: {os.path.exists(os.environ.get('CHROMEDRIVER_PATH', ''))}")
+        
+        # Try to run chrome directly to see if it works
+        import subprocess
+        try:
+          result = subprocess.run([os.environ.get('CHROME_BIN', 'chromium'), '--version'], 
+                                capture_output=True, text=True, timeout=10)
+          print(f"  Chrome version check: {result.stdout.strip()}")
+        except Exception as chrome_e:
+          print(f"  Chrome direct execution failed: {chrome_e}")
+      
+      import traceback
+      traceback.print_exc()
       raise
   
   @with_retry(config={'max_attempts': 3, 'base_delay': 2.0})
@@ -848,7 +890,7 @@ def parse_bands(start, end, session, max_bands=None, existing_bands=None):
             
             # Extract band ID from URL (e.g., /artist/64300 -> 64300)
             #url_match = re.search(r'\/artist\/\w*?(\d+)', band_url)
-            url_match = re.search(r'\/artist\/\w*?(\d+)\z', band_url)
+            url_match = re.search(r'\/artist\/\w*?(\d+)$', band_url)
             if not url_match:
               continue
             
