@@ -13,13 +13,13 @@ ENV RUNNING_IN_CONTAINER=true
 WORKDIR /app
 
 # Install system dependencies
+RUN snap install chromium
 RUN apt-get update && apt-get install -y \
     # Python and pip
     python3 \
     python3-pip \
     python3-venv \
     # Chromium and dependencies
-    chromium-browser \
     chromium-chromedriver \
     # Additional dependencies for Chromium
     fonts-liberation \
@@ -70,7 +70,7 @@ COPY README.md .
 RUN mkdir -p /app/output
 
 # Create a non-root user for security
-RUN useradd -m -u 1000 scraper && \
+RUN useradd -m -u 1234 scraper && \
     chown -R scraper:scraper /app
 USER scraper
 
