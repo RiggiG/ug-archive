@@ -4,6 +4,10 @@
 
 Scrapes tabs from ultimate-guitar.com using Selenium WebDriver to handle JavaScript-rendered content.
 
+Note - I've included a fresh scrape zip from 20250725, so you can skip the scraping and get to the downloading if you like.
+Extract it into the repo root and you're off. Pass it as-is with `--local-files-dir` for local use, and bind mount it to the
+Docker container for that use case.
+
 ## Script Arguments
 
 | Argument | Default | Description |
