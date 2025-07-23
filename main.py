@@ -403,7 +403,7 @@ class Tab:
     on the tab page (the link for which we pulled from the href when parsing). Additionally, metadata is extracted from
     the unordered list element with class `tabHeader-info` and included in the text file if include_metadata is True.
     '''
-    if self.type.upper() == 'PRO':
+    if self.type.upper() in ['PRO', 'PWR']:
       result = self._download_pro_tab(session)
       if result and isinstance(result, dict):
         # Store the extension info for later use
