@@ -62,7 +62,7 @@ pip install -r requirements.txt
 ### Docker Container
 ```bash
 # Build with your user ID for proper file permissions
-docker build --build-arg USER_UID=$(id -u) -t ug-scraper .
+docker build --build-arg USER_UID=$(id -u) -t riggi/ug-archive .
 # Or pull from Docker Hub, uses UID 1000 and I can't be bothered to apply any further effort
 docker pull riggi/ug-archive
 ```
@@ -95,22 +95,22 @@ python main.py --include-metadata --outdir ./tabs_with_metadata
 
 ```bash
 # Full scrape + download mode, no limits
-docker run --rm -v $(pwd)/output:/app/output ug-scraper python main.py --outdir /app/output
+docker run --rm -v $(pwd)/output:/app/output riggi/ug-archive python main.py --outdir /app/output
 
 # Scrape-only mode (metadata collection), limited to a maximum of 10 bands
-docker run --rm -v $(pwd)/metadata:/app/output ug-scraper python main.py --scrape-only --max-bands 10 --outdir /app/output
+docker run --rm -v $(pwd)/metadata:/app/output riggi/ug-archive python main.py --scrape-only --max-bands 10 --outdir /app/output
 
 # Download-only mode (using existing metadata)
-docker run --rm -v $(pwd)/data:/app/output ug-scraper python main.py --download-only --local-files-dir /app/output --outdir /app/output
+docker run --rm -v $(pwd)/data:/app/output riggi/ug-archive python main.py --download-only --local-files-dir /app/output --outdir /app/output
 
 # Tab type filtering (chord charts only)
-docker run --rm -v $(pwd)/chords:/app/output ug-scraper python main.py --tab-types CRD --max-bands 5 --outdir /app/output
+docker run --rm -v $(pwd)/chords:/app/output riggi/ug-archive python main.py --tab-types CRD --max-bands 5 --outdir /app/output
 
 # Letter range setting (single letter), only 20 tabs per band, scraping + downloading
-docker run --rm -v $(pwd)/output:/app/output ug-scraper python main.py --starting-letter m --end-letter m --max-tabs-per-band 20 --outdir /app/output
+docker run --rm -v $(pwd)/output:/app/output riggi/ug-archive python main.py --starting-letter m --end-letter m --max-tabs-per-band 20 --outdir /app/output
 
 # Include metadata headers in downloaded tab files
-docker run --rm -v $(pwd)/tabs_with_metadata:/app/output ug-scraper python main.py --include-metadata --max-bands 3 --outdir /app/output
+docker run --rm -v $(pwd)/tabs_with_metadata:/app/output riggi/ug-archive python main.py --include-metadata --max-bands 3 --outdir /app/output
 ```
 
 ## Output Structure
