@@ -1430,11 +1430,11 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     if progress_lock:
       with progress_lock:
         processed_tabs += increment
-        print(f"Progress: {processed_tabs}/{total_tabs} tabs processed")
+        print(f"\rProgress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
     else:
       processed_tabs += increment
-      print(f"Progress: {processed_tabs}/{total_tabs} tabs processed")
-  
+      print(f"Progress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
+
   if num_threads > 1:
     print(f"Using {num_threads} parallel threads for processing")
     
