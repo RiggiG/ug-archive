@@ -18,6 +18,7 @@ import re
 import time
 import random
 import functools
+import threading
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -32,6 +33,137 @@ DEFAULT_RETRY_CONFIG = {
     'exponential_base': 2.0,
     'jitter': True
 }
+
+# Adaptive delay configuration
+ADAPTIVE_DELAY_CONFIG = {
+    'initial_delay': 0.0,          # Initial delay between downloads (seconds)
+    'max_delay': 10.0,             # Maximum delay between downloads (seconds)
+    'failure_threshold': 0.2,      # Failure rate threshold (20%)
+    'window_size': 50,             # Number of recent downloads to track
+    'delay_increment': 0.5,        # How much to increase delay when failure rate is high
+    'delay_decrement': 0.1,        # How much to decrease delay when failure rate is low
+    'check_interval': 10           # Check and adjust delay every N downloads
+}
+
+class AdaptiveDelayTracker:
+    """
+    Tracks download failure rates across threads and adjusts delay accordingly.
+    Thread-safe implementation for use in multi-threaded download scenarios.
+    """
+    
+    def __init__(self, config=None):
+        if config is None:
+            config = ADAPTIVE_DELAY_CONFIG.copy()
+        
+        self.config = config
+        self.lock = threading.Lock()
+        
+        # Tracking variables
+        self.current_delay = config['initial_delay']
+        self.download_results = []  # List of (success: bool, timestamp: float) tuples
+        self.download_count = 0
+        self.last_adjustment = 0
+        
+        # Statistics
+        self.total_downloads = 0
+        self.total_failures = 0
+        
+    def record_download(self, success):
+        """
+        Record the result of a download attempt.
+        
+        Args:
+            success (bool): True if download succeeded, False if failed
+        """
+        with self.lock:
+            timestamp = time.time()
+            self.download_results.append((success, timestamp))
+            self.download_count += 1
+            self.total_downloads += 1
+            
+            if not success:
+                self.total_failures += 1
+            
+            # Keep only the most recent results within the window
+            if len(self.download_results) > self.config['window_size']:
+                self.download_results.pop(0)
+            
+            # Check if we should adjust delay
+            if (self.download_count - self.last_adjustment) >= self.config['check_interval']:
+                self._adjust_delay()
+                self.last_adjustment = self.download_count
+    
+    def _adjust_delay(self):
+        """
+        Adjust the current delay based on recent failure rate.
+        Must be called with lock held.
+        """
+        if len(self.download_results) < 5:  # Need minimum data points
+            return
+        
+        # Calculate failure rate from recent downloads
+        recent_failures = sum(1 for success, _ in self.download_results if not success)
+        failure_rate = recent_failures / len(self.download_results)
+        
+        # Adjust delay based on failure rate
+        if failure_rate > self.config['failure_threshold']:
+            # High failure rate - increase delay
+            old_delay = self.current_delay
+            self.current_delay = min(
+                self.current_delay + self.config['delay_increment'],
+                self.config['max_delay']
+            )
+            if self.current_delay > old_delay:
+                print(f"\n⚠ High failure rate ({failure_rate:.1%}) detected - increasing delay to {self.current_delay:.1f}s")
+        
+        elif failure_rate < (self.config['failure_threshold'] * 0.5):
+            # Low failure rate - decrease delay
+            old_delay = self.current_delay
+            self.current_delay = max(
+                self.current_delay - self.config['delay_decrement'],
+                self.config['initial_delay']
+            )
+            if self.current_delay < old_delay:
+                print(f"\n✓ Low failure rate ({failure_rate:.1%}) detected - decreasing delay to {self.current_delay:.1f}s")
+    
+    def get_current_delay(self):
+        """
+        Get the current delay value (thread-safe).
+        
+        Returns:
+            float: Current delay in seconds
+        """
+        with self.lock:
+            return self.current_delay
+    
+    def get_statistics(self):
+        """
+        Get current statistics (thread-safe).
+        
+        Returns:
+            dict: Statistics including failure rate, total downloads, etc.
+        """
+        with self.lock:
+            if self.total_downloads == 0:
+                overall_failure_rate = 0.0
+                recent_failure_rate = 0.0
+            else:
+                overall_failure_rate = self.total_failures / self.total_downloads
+                
+                if len(self.download_results) > 0:
+                    recent_failures = sum(1 for success, _ in self.download_results if not success)
+                    recent_failure_rate = recent_failures / len(self.download_results)
+                else:
+                    recent_failure_rate = 0.0
+            
+            return {
+                'current_delay': self.current_delay,
+                'total_downloads': self.total_downloads,
+                'total_failures': self.total_failures,
+                'overall_failure_rate': overall_failure_rate,
+                'recent_failure_rate': recent_failure_rate,
+                'window_size': len(self.download_results)
+            }
 
 def with_retry(config=None, retry_on=None):
     """
@@ -990,7 +1122,7 @@ def get_band_letter_category(band_name):
     # Anything else (numbers, symbols, non-Latin characters) goes to '0-9'
     return '0-9'
 
-def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_existing=True, progress_callback=None, thread_id=None):
+def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_existing=True, progress_callback=None, thread_id=None, delay_tracker=None):
   '''
   Downloads all tabs for a given band and saves them to disk.
   Creates a folder for the band and saves each tab as a separate file.
@@ -1004,9 +1136,10 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
     skip_existing: Skip download if file already exists
     progress_callback: Function to call for progress updates (increment-based)
     thread_id: Thread identifier (None if single-threaded, reduces verbosity if set)
+    delay_tracker: AdaptiveDelayTracker instance for failure rate tracking
   
   Returns:
-    int: Number of tabs processed
+    dict: Statistics including tabs processed, downloaded, failed
   '''
   # Determine verbosity based on threading mode
   verbose = thread_id is None  # Verbose only in single-threaded mode
@@ -1014,7 +1147,7 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
   if not hasattr(band, 'tabs') or not band.tabs:
     if verbose:
       print(f"  No tabs to download for {band.name}")
-    return
+    return {'tabs_processed': 0, 'downloaded_count': 0, 'failed_count': 0}
   
   # Create safe folder name for the band
   safe_band_name = band._sanitize_folder_name(band.name)
@@ -1036,16 +1169,33 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
       # Call progress callback if provided (increment by 1 for each tab processed)
       if progress_callback:
         progress_callback(1)
+      
+      # Apply adaptive delay before download (but after checking for duplicates)
+      if delay_tracker:
+        current_delay = delay_tracker.get_current_delay()
+        if current_delay > 0:
+          time.sleep(current_delay)
         
       file_path = tab.save_to_disk(session, band_folder, include_metadata, skip_existing, verbose)
-      if file_path:
+      success = file_path is not None
+      
+      # Record the download result for failure tracking
+      if delay_tracker:
+        delay_tracker.record_download(success)
+      
+      if success:
         tab.file_path = file_path
         downloaded_count += 1
       else:
         failed_count += 1
       
       tabs_processed += 1
+      
     except Exception as e:
+      # Record failure for tracking
+      if delay_tracker:
+        delay_tracker.record_download(False)
+        
       if verbose:
         print(f"      Error downloading tab {tab_id}: {e}")
       failed_count += 1
@@ -1053,10 +1203,15 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
   
   if verbose:
     print(f"  Downloaded: {downloaded_count} tabs, Failed: {failed_count} tabs")
-  return tabs_processed
+  
+  return {
+    'tabs_processed': tabs_processed,
+    'downloaded_count': downloaded_count,
+    'failed_count': failed_count
+  }
 
 
-def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True, progress_callback=None):
+def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True, progress_callback=None, delay_tracker=None):
   """
   Process a chunk of band files in a single thread.
   Each thread gets its own Selenium session to avoid conflicts.
@@ -1070,6 +1225,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
     thread_id: Thread identifier for logging
     skip_existing: Skip download if file already exists
     progress_callback: Function to call for progress updates
+    delay_tracker: AdaptiveDelayTracker instance for failure rate tracking
   """
   # Create a separate Selenium session for this thread
   session = SeleniumSession()
@@ -1079,10 +1235,11 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
       'bands_processed': 0,
       'tabs_found': 0,
       'files_downloaded': 0,
+      'files_failed': 0,
       'thread_id': thread_id
     }
     
-    print(f"Thread {thread_id}: Processing {len(band_files_chunk)} band files")
+    print(f"\nThread {thread_id}: Processing {len(band_files_chunk)} band files")
     
     for band_file in band_files_chunk:
       try:
@@ -1099,7 +1256,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
           
           # Limit tabs if specified
           if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
-            print(f"Thread {thread_id}: Limiting to {max_tabs_per_band} tabs for {band.name} (found {len(tabs_to_process)})")
+            print(f"\nThread {thread_id}: Limiting to {max_tabs_per_band} tabs for {band.name} (found {len(tabs_to_process)})")
             # Take the first N tabs
             tabs_items = list(tabs_to_process.items())[:max_tabs_per_band]
             tabs_to_process = dict(tabs_items)
@@ -1116,37 +1273,33 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
             tab = Tab(tab_data['id'], tab_data['title'], tab_data['type'], tab_data['url'])
             band.add_tab(tab)
           
-          print(f"Thread {thread_id}: Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
+          print(f"\nThread {thread_id}: Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
           thread_stats['tabs_found'] += len(band.tabs)
           
-          # Download tabs for this band
-          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, thread_id)
+          # Download tabs for this band with adaptive delay tracking
+          download_results = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, thread_id, delay_tracker)
           
-          # Count successful downloads
-          files_downloaded = 0
-          for tab in band.tabs.values():
-            if hasattr(tab, 'file_path') and tab.file_path:
-              files_downloaded += 1
-          
-          thread_stats['files_downloaded'] += files_downloaded
+          # Update thread statistics
+          thread_stats['files_downloaded'] += download_results['downloaded_count']
+          thread_stats['files_failed'] += download_results['failed_count']
           
           # Update the band JSON file with file paths
           updated_band_data = band.to_dict()
           with open(band_file, 'w', encoding='utf-8') as f:
             json.dump(updated_band_data, f, indent=2, ensure_ascii=False)
           
-          print(f"Thread {thread_id}: Updated band file: {os.path.basename(band_file)}")
+          print(f"\nThread {thread_id}: Updated band file: {os.path.basename(band_file)}")
           
         else:
-          print(f"Thread {thread_id}: No tabs found in band file: {os.path.basename(band_file)}")
+          print(f"\nThread {thread_id}: No tabs found in band file: {os.path.basename(band_file)}")
         
         thread_stats['bands_processed'] += 1
         
       except Exception as e:
-        print(f"Thread {thread_id}: Error processing band file {os.path.basename(band_file)}: {e}")
+        print(f"\nThread {thread_id}: Error processing band file {os.path.basename(band_file)}: {e}")
         continue
     
-    print(f"Thread {thread_id}: Completed processing {thread_stats['bands_processed']} bands")
+    print(f"\nThread {thread_id}: Completed processing {thread_stats['bands_processed']} bands")
     return thread_stats
     
   finally:
@@ -1154,10 +1307,10 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
     try:
       session.close()
     except Exception as e:
-      print(f"Thread {thread_id}: Error closing session: {e}")
+      print(f"\nThread {thread_id}: Error closing session: {e}")
 
 
-def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False, num_threads=1, starting_letter='0-9', end_letter='z', skip_existing=True):
+def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False, num_threads=1, starting_letter='0-9', end_letter='z', skip_existing=True, disable_adaptive_delay=False):
   '''
   Process existing local artist JSON files to download tabs without scraping.
   This allows downloading tabs from previously scraped metadata.
@@ -1175,6 +1328,7 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     starting_letter (str): Starting letter/category for band filtering
     end_letter (str): Ending letter/category for band filtering
     skip_existing (bool): Skip download if file already exists
+    disable_adaptive_delay (bool): Disable adaptive delay tracking for failure rate management
   '''
   if not os.path.exists(local_files_dir):
     print(f"Error: Local files directory does not exist: {local_files_dir}")
@@ -1264,7 +1418,6 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
   processed_tabs = 0
   progress_lock = None
   if num_threads > 1:
-    import threading
     progress_lock = threading.Lock()
   
   def progress_callback(increment=1):
@@ -1284,6 +1437,15 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
   
   if num_threads > 1:
     print(f"Using {num_threads} parallel threads for processing")
+    
+    # Create shared adaptive delay tracker for failure rate management (unless disabled)
+    delay_tracker = None
+    if not disable_adaptive_delay:
+      delay_tracker = AdaptiveDelayTracker()
+      print(f"Adaptive delay tracking enabled - initial delay: {delay_tracker.get_current_delay():.1f}s, "
+            f"failure threshold: {delay_tracker.config['failure_threshold']:.1%}")
+    else:
+      print("Adaptive delay tracking disabled")
     
     # Split band files into chunks for parallel processing
     chunk_size = len(band_files) // num_threads
@@ -1309,7 +1471,8 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     total_stats = {
       'bands_processed': 0,
       'tabs_found': 0,
-      'files_downloaded': 0
+      'files_downloaded': 0,
+      'files_failed': 0
     }
     
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -1324,7 +1487,8 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           include_metadata, 
           i + 1,
           skip_existing,
-          progress_callback
+          progress_callback,
+          delay_tracker  # Pass shared delay tracker to all threads
         ): i + 1 
         for i, chunk in enumerate(band_chunks)
       }
@@ -1337,10 +1501,22 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           total_stats['bands_processed'] += thread_stats['bands_processed']
           total_stats['tabs_found'] += thread_stats['tabs_found']
           total_stats['files_downloaded'] += thread_stats['files_downloaded']
-          print(f"Thread {thread_id} completed: {thread_stats['bands_processed']} bands, "
-                f"{thread_stats['tabs_found']} tabs, {thread_stats['files_downloaded']} downloads")
+          total_stats['files_failed'] += thread_stats.get('files_failed', 0)
+          print(f"\nThread {thread_id} completed: {thread_stats['bands_processed']} bands, "
+                f"{thread_stats['tabs_found']} tabs, {thread_stats['files_downloaded']} downloads, "
+                f"{thread_stats.get('files_failed', 0)} failures")
         except Exception as e:
-          print(f"Thread {thread_id} failed with error: {e}")
+          print(f"\nThread {thread_id} failed with error: {e}")
+    
+    # Print final delay tracker statistics (if enabled)
+    if delay_tracker:
+      delay_stats = delay_tracker.get_statistics()
+      print(f"\nAdaptive delay final statistics:")
+      print(f"  Final delay: {delay_stats['current_delay']:.1f}s")
+      print(f"  Total downloads: {delay_stats['total_downloads']}")
+      print(f"  Total failures: {delay_stats['total_failures']}")
+      print(f"  Overall failure rate: {delay_stats['overall_failure_rate']:.1%}")
+      print(f"  Recent failure rate: {delay_stats['recent_failure_rate']:.1%}")
     
     total_bands_processed = total_stats['bands_processed']
     total_tabs_found = total_stats['tabs_found']
@@ -1391,15 +1567,10 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           total_tabs_found += len(band.tabs)
           
           # Download tabs for this band (single-threaded mode, verbose=True)
-          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, None)
+          download_results = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, None, None)
           
           # Count successful downloads
-          files_downloaded = 0
-          for tab in band.tabs.values():
-            if hasattr(tab, 'file_path') and tab.file_path:
-              files_downloaded += 1
-          
-          total_files_downloaded += files_downloaded
+          total_files_downloaded += download_results['downloaded_count']
           
           # Update the band JSON file with file paths
           updated_band_data = band.to_dict()
@@ -1708,6 +1879,16 @@ def main():
   parser.add_argument('--retry-max-delay', type=float, default=30.0, help='Maximum delay in seconds for exponential backoff (default: 30.0)')
   parser.add_argument('--disable-retry-jitter', action='store_true', help='Disable random jitter in retry delays (default: enabled)')
   
+  # Adaptive delay configuration (for threaded downloads)
+  parser.add_argument('--adaptive-delay-initial', type=float, default=0.0, help='Initial delay between downloads in seconds (default: 0.0)')
+  parser.add_argument('--adaptive-delay-max', type=float, default=10.0, help='Maximum delay between downloads in seconds (default: 10.0)')
+  parser.add_argument('--adaptive-delay-threshold', type=float, default=0.2, help='Failure rate threshold for increasing delay (default: 0.2 = 20%%)')
+  parser.add_argument('--adaptive-delay-window', type=int, default=50, help='Number of recent downloads to track for failure rate (default: 50)')
+  parser.add_argument('--adaptive-delay-increment', type=float, default=0.5, help='How much to increase delay when failure rate is high (default: 0.5s)')
+  parser.add_argument('--adaptive-delay-decrement', type=float, default=0.1, help='How much to decrease delay when failure rate is low (default: 0.1s)')
+  parser.add_argument('--adaptive-delay-check-interval', type=int, default=10, help='Check and adjust delay every N downloads (default: 10)')
+  parser.add_argument('--disable-adaptive-delay', action='store_true', help='Disable adaptive delay tracking (default: enabled in threaded mode)')
+  
   # Scraping control switches
   parser.add_argument('--scrape-only', action='store_true', help='Only scrape bands and tabs metadata, skip downloading tab content')
   parser.add_argument('--download-only', action='store_true', help='Only download tabs using existing local artist files, skip scraping')
@@ -1758,6 +1939,28 @@ def main():
         f"{args.retry_max_delay}s max delay, "
         f"jitter {'disabled' if args.disable_retry_jitter else 'enabled'}")
 
+  # Configure adaptive delay settings
+  global ADAPTIVE_DELAY_CONFIG
+  ADAPTIVE_DELAY_CONFIG.update({
+    'initial_delay': args.adaptive_delay_initial,
+    'max_delay': args.adaptive_delay_max,
+    'failure_threshold': args.adaptive_delay_threshold,
+    'window_size': args.adaptive_delay_window,
+    'delay_increment': args.adaptive_delay_increment,
+    'delay_decrement': args.adaptive_delay_decrement,
+    'check_interval': args.adaptive_delay_check_interval
+  })
+  
+  if args.threads > 1 and not args.disable_adaptive_delay:
+    print(f"Adaptive delay configuration: initial={args.adaptive_delay_initial}s, "
+          f"max={args.adaptive_delay_max}s, "
+          f"threshold={args.adaptive_delay_threshold:.1%}, "
+          f"window={args.adaptive_delay_window}")
+  elif args.disable_adaptive_delay:
+    print("Adaptive delay tracking disabled")
+  else:
+    print("Adaptive delay tracking only active in multi-threaded mode")
+
   # Setup Selenium session
   session = SeleniumSession()
   bands = {}  # Initialize bands dictionary for cleanup
@@ -1785,7 +1988,7 @@ def main():
       else:
         print("Tab file handling: Skip existing files")
       
-      process_local_artist_files(args.local_files_dir, args.outdir, session, args.max_tabs_per_band, args.max_bands, args.tab_types, args.include_metadata, args.threads, args.starting_letter, args.end_letter, args.skip_existing_tabs)
+      process_local_artist_files(args.local_files_dir, args.outdir, session, args.max_tabs_per_band, args.max_bands, args.tab_types, args.include_metadata, args.threads, args.starting_letter, args.end_letter, args.skip_existing_tabs, args.disable_adaptive_delay)
       
     else:
       # Scraping mode (with or without downloads)
