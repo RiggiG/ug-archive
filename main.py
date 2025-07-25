@@ -257,9 +257,9 @@ def validate_js_loading(session, validators, retry_config=None):
     """
     if retry_config is None:
         retry_config = {
-            'max_attempts': 3,
+            'max_attempts': 4,
             'base_delay': 4.0,
-            'max_delay': 9.0
+            'max_delay': 12.0
         }
     
     @with_retry(config=retry_config, retry_on=(Exception,))
