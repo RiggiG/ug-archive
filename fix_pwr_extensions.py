@@ -78,43 +78,58 @@ def update_json_file_paths(directory, old_filepath, new_filepath):
     """
     json_files_updated = 0
     
-    # Look for band JSON files
-    for root, dirs, files in os.walk(directory):
-        for json_filename in files:
-            if json_filename.startswith('band_') and json_filename.endswith('.json'):
-                json_filepath = os.path.join(root, json_filename)
-                
-                try:
-                    # Read JSON file
-                    with open(json_filepath, 'r', encoding='utf-8') as f:
-                        band_data = json.load(f)
-                    
-                    # Extract tab ID from the old filepath filename
-                    tab_filename = os.path.basename(old_filepath)
-                    # Pattern: <name>_PWR_<id>.txt
-                    id_match = re.search(r'_PWR_(\d+)\.txt$', tab_filename, re.IGNORECASE)
-                    if not id_match:
-                        continue
-                    
-                    tab_id = id_match.group(1)
-                    
-                    # Check if this specific tab references the old file path
-                    updated = False
-                    if 'tabs' in band_data and tab_id in band_data['tabs']:
-                        tab_data = band_data['tabs'][tab_id]
-                        if 'file_path' in tab_data and tab_data['file_path'] == old_filepath:
-                            tab_data['file_path'] = new_filepath
-                            updated = True
-                            print(f"    Updated JSON reference in {json_filename}")
-                    
-                    # Write back if updated
-                    if updated:
-                        with open(json_filepath, 'w', encoding='utf-8') as f:
-                            json.dump(band_data, f, indent=2, ensure_ascii=False)
-                        json_files_updated += 1
-                        
-                except Exception as e:
-                    print(f"    Warning: Error updating JSON file {json_filename}: {e}")
+    # Extract band ID from the directory name containing the tab file
+    tab_dir = os.path.dirname(old_filepath)
+    band_dir_name = os.path.basename(tab_dir)
+    
+    # Pattern: <band_name>_<band_id>
+    band_id_match = re.search(r'_(\d+)$', band_dir_name)
+    if not band_id_match:
+        print(f"    Warning: Could not extract band ID from directory name: {band_dir_name}")
+        return 0
+    
+    band_id = band_id_match.group(1)
+    
+    # Look for the specific band JSON file
+    json_filename = f"band_{band_id}.json"
+    json_filepath = os.path.join(directory, json_filename)
+    
+    if not os.path.exists(json_filepath):
+        print(f"    Warning: Band JSON file not found: {json_filename}")
+        return 0
+    
+    try:
+        # Read JSON file
+        with open(json_filepath, 'r', encoding='utf-8') as f:
+            band_data = json.load(f)
+        
+        # Extract tab ID from the old filepath filename
+        tab_filename = os.path.basename(old_filepath)
+        # Pattern: <name>_PWR_<id>.txt
+        id_match = re.search(r'_PWR_(\d+)\.txt$', tab_filename, re.IGNORECASE)
+        if not id_match:
+            print(f"    Warning: Could not extract tab ID from filename: {tab_filename}")
+            return 0
+        
+        tab_id = id_match.group(1)
+        
+        # Check if this specific tab references the old file path
+        updated = False
+        if 'tabs' in band_data and tab_id in band_data['tabs']:
+            tab_data = band_data['tabs'][tab_id]
+            if 'file_path' in tab_data and tab_data['file_path'] == old_filepath:
+                tab_data['file_path'] = new_filepath
+                updated = True
+                print(f"    Updated JSON reference in {json_filename}")
+        
+        # Write back if updated
+        if updated:
+            with open(json_filepath, 'w', encoding='utf-8') as f:
+                json.dump(band_data, f, indent=2, ensure_ascii=False)
+            json_files_updated = 1
+            
+    except Exception as e:
+        print(f"    Warning: Error updating JSON file {json_filename}: {e}")
     
     return json_files_updated
 
