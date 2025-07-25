@@ -20,6 +20,17 @@ import random
 import functools
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+import os
+import time
+import json
+import re
+import argparse
+import traceback
+import functools
+import random
+import requests
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BANDS = ['0-9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 
@@ -639,18 +650,18 @@ class Tab:
     lines.append("=" * 20)
     
     return "\n".join(lines)
-  def save_to_disk(self, session, artist_folder, include_metadata=False):
+  def save_to_disk(self, session, artist_folder, include_metadata=False, skip_existing=True):
     '''
     Downloads and saves the tab content to disk.
     Returns the file path if successful, None otherwise.
+    
+    Args:
+      session: SeleniumSession instance
+      artist_folder: Directory to save the tab file
+      include_metadata: Whether to include metadata in the file
+      skip_existing: Skip download if file already exists (default: True)
     '''
     try:
-      # Download the tab content
-      content = self.download(session, include_metadata)
-      if content is None:
-        print(f"      Failed to download tab {self.id}")
-        return None
-      
       # Create a safe filename from title and type
       safe_title = self._sanitize_filename(self.title)
       safe_type = self._sanitize_filename(self.type)
@@ -665,10 +676,20 @@ class Tab:
       filename = f"{safe_title}_{safe_type}_{self.id}{extension}"
       filepath = os.path.join(artist_folder, filename)
       
-      # Check if file already exists
-      if os.path.exists(filepath):
-        print(f"      File already exists: {filename}")
-        return filepath
+      # Check if file already exists and handle based on flags
+      file_exists = os.path.exists(filepath)
+      if file_exists:
+        if skip_existing:
+          print(f"      File already exists, skipping: {filename}")
+          return filepath
+        else:
+          print(f"      File already exists, overwriting: {filename}")
+      
+      # Download the tab content
+      content = self.download(session, include_metadata)
+      if content is None:
+        print(f"      Failed to download tab {self.id}")
+        return None
       
       # Write content to file
       mode = 'wb' if isinstance(content, bytes) else 'w'
@@ -679,7 +700,8 @@ class Tab:
       
       # Verify file was written
       if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
-        print(f"      Saved: {filename} ({os.path.getsize(filepath)} bytes)")
+        action = "Overwritten" if file_exists and not skip_existing else "Saved"
+        print(f"      {action}: {filename} ({os.path.getsize(filepath)} bytes)")
         return filepath
       else:
         print(f"      Failed to save file or file is empty: {filename}")
@@ -940,11 +962,41 @@ def parse_bands(start, end, session, max_bands=None, existing_bands=None):
   print(f"Total bands found: {len(bands)}")
   return bands
 
-def download_band_tabs(band, session, base_outdir, include_metadata=False):
+def get_band_letter_category(band_name):
+  '''
+  Determine which letter category a band name falls into.
+  Returns the appropriate BANDS category ('0-9', 'a', 'b', etc.)
+  
+  Args:
+    band_name (str): The name of the band
+    
+  Returns:
+    str: The letter category ('0-9' for non-alphabetic, or lowercase letter)
+  '''
+  if not band_name:
+    return '0-9'
+  
+  first_char = band_name.strip().lower()[:1]
+  
+  # Check if it's a lowercase letter a-z
+  if first_char.isalpha() and 'a' <= first_char <= 'z':
+    return first_char
+  else:
+    # Anything else (numbers, symbols, non-Latin characters) goes to '0-9'
+    return '0-9'
+
+def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_existing=True):
   '''
   Downloads all tabs for a given band and saves them to disk.
   Creates a folder for the band and saves each tab as a separate file.
   Updates tab objects with file paths.
+  
+  Args:
+    band: Band object containing tabs to download
+    session: SeleniumSession instance
+    base_outdir: Base output directory
+    include_metadata: Whether to include metadata in tab files
+    skip_existing: Skip download if file already exists
   '''
   if not hasattr(band, 'tabs') or not band.tabs:
     print(f"  No tabs to download for {band.name}")
@@ -969,7 +1021,7 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False):
       if i > 0:
         time.sleep(1)  # 1 second delay between downloads
         
-      file_path = tab.save_to_disk(session, band_folder, include_metadata)
+      file_path = tab.save_to_disk(session, band_folder, include_metadata, skip_existing)
       if file_path:
         tab.file_path = file_path
         downloaded_count += 1
@@ -982,10 +1034,124 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False):
   print(f"  Downloaded: {downloaded_count} tabs, Failed: {failed_count} tabs")
 
 
-def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False):
+def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True):
+  """
+  Process a chunk of band files in a single thread.
+  Each thread gets its own Selenium session to avoid conflicts.
+  
+  Args:
+    band_files_chunk: List of band file paths to process
+    output_dir: Output directory for downloaded tabs
+    max_tabs_per_band: Maximum tabs per band to process
+    allowed_types: List of allowed tab types
+    include_metadata: Whether to include metadata in files
+    thread_id: Thread identifier for logging
+    skip_existing: Skip download if file already exists
+  """
+  # Create a separate Selenium session for this thread
+  session = SeleniumSession()
+  
+  try:
+    thread_stats = {
+      'bands_processed': 0,
+      'tabs_found': 0,
+      'files_downloaded': 0,
+      'thread_id': thread_id
+    }
+    
+    print(f"Thread {thread_id}: Processing {len(band_files_chunk)} band files")
+    
+    for band_file in band_files_chunk:
+      try:
+        # Load band data from JSON
+        with open(band_file, 'r', encoding='utf-8') as f:
+          band_data = json.load(f)
+        
+        # Reconstruct Band object
+        band = Band(band_data['id'], band_data['name'], band_data['url'])
+        
+        # Reconstruct Tab objects
+        if 'tabs' in band_data and band_data['tabs']:
+          tabs_to_process = band_data['tabs']
+          
+          # Limit tabs if specified
+          if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
+            print(f"Thread {thread_id}: Limiting to {max_tabs_per_band} tabs for {band.name} (found {len(tabs_to_process)})")
+            # Take the first N tabs
+            tabs_items = list(tabs_to_process.items())[:max_tabs_per_band]
+            tabs_to_process = dict(tabs_items)
+          
+          for tab_id, tab_data in tabs_to_process.items():
+            # Always skip OFFICIAL tabs
+            if tab_data['type'].upper() == 'OFFICIAL':
+              continue
+            
+            # Filter by allowed types if specified
+            if allowed_types and tab_data['type'].upper() not in [t.upper() for t in allowed_types]:
+              continue  # Skip this tab if its type is not in the allowed list
+            
+            tab = Tab(tab_data['id'], tab_data['title'], tab_data['type'], tab_data['url'])
+            band.add_tab(tab)
+          
+          print(f"Thread {thread_id}: Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
+          thread_stats['tabs_found'] += len(band.tabs)
+          
+          # Download tabs for this band
+          download_band_tabs(band, session, output_dir, include_metadata, skip_existing)
+          
+          # Count successful downloads
+          files_downloaded = 0
+          for tab in band.tabs.values():
+            if hasattr(tab, 'file_path') and tab.file_path:
+              files_downloaded += 1
+          
+          thread_stats['files_downloaded'] += files_downloaded
+          
+          # Update the band JSON file with file paths
+          updated_band_data = band.to_dict()
+          with open(band_file, 'w', encoding='utf-8') as f:
+            json.dump(updated_band_data, f, indent=2, ensure_ascii=False)
+          
+          print(f"Thread {thread_id}: Updated band file: {os.path.basename(band_file)}")
+          
+        else:
+          print(f"Thread {thread_id}: No tabs found in band file: {os.path.basename(band_file)}")
+        
+        thread_stats['bands_processed'] += 1
+        
+      except Exception as e:
+        print(f"Thread {thread_id}: Error processing band file {os.path.basename(band_file)}: {e}")
+        continue
+    
+    print(f"Thread {thread_id}: Completed processing {thread_stats['bands_processed']} bands")
+    return thread_stats
+    
+  finally:
+    # Clean up Selenium session for this thread
+    try:
+      session.close()
+    except Exception as e:
+      print(f"Thread {thread_id}: Error closing session: {e}")
+
+
+def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False, num_threads=1, starting_letter='0-9', end_letter='z', skip_existing=True):
   '''
   Process existing local artist JSON files to download tabs without scraping.
   This allows downloading tabs from previously scraped metadata.
+  Supports parallel processing with multiple threads for faster downloads.
+  
+  Args:
+    local_files_dir (str): Directory containing band JSON files
+    output_dir (str): Directory to save downloaded tabs
+    session: SeleniumSession instance
+    max_tabs_per_band (int): Maximum tabs per band to process
+    max_bands (int): Maximum number of bands to process
+    allowed_types (list): List of allowed tab types to filter
+    include_metadata (bool): Whether to include metadata in tab files
+    num_threads (int): Number of parallel threads for processing
+    starting_letter (str): Starting letter/category for band filtering
+    end_letter (str): Ending letter/category for band filtering
+    skip_existing (bool): Skip download if file already exists
   '''
   if not os.path.exists(local_files_dir):
     print(f"Error: Local files directory does not exist: {local_files_dir}")
@@ -1001,6 +1167,41 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     print(f"No band JSON files found in: {local_files_dir}")
     return
   
+  # Filter band files by letter range if specified
+  if starting_letter != '0-9' or end_letter != 'z':
+    print(f"Filtering bands by letter range: '{starting_letter}' to '{end_letter}'")
+    
+    # Get the range of letters to process
+    start_idx = BANDS.index(starting_letter) if starting_letter in BANDS else 0
+    end_idx = BANDS.index(end_letter) if end_letter in BANDS else len(BANDS) - 1
+    allowed_letters = set(BANDS[start_idx:end_idx + 1])
+    
+    filtered_band_files = []
+    for band_file in band_files:
+      try:
+        # Load band data to get the band name
+        with open(band_file, 'r', encoding='utf-8') as f:
+          band_data = json.load(f)
+        
+        band_name = band_data.get('name', '')
+        band_letter = get_band_letter_category(band_name)
+        
+        if band_letter in allowed_letters:
+          filtered_band_files.append(band_file)
+        else:
+          print(f"  Skipping band '{band_name}' (letter '{band_letter}' not in range)")
+          
+      except Exception as e:
+        print(f"  Warning: Could not read band file {os.path.basename(band_file)}: {e}")
+        continue
+    
+    print(f"Filtered {len(band_files)} band files to {len(filtered_band_files)} based on letter range")
+    band_files = filtered_band_files
+    
+    if not band_files:
+      print(f"No band files match the letter range '{starting_letter}' to '{end_letter}'")
+      return
+  
   # Limit bands if specified
   if max_bands and len(band_files) > max_bands:
     print(f"Limiting to {max_bands} band files (found {len(band_files)})")
@@ -1008,71 +1209,138 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
   
   print(f"Found {len(band_files)} band files to process")
   
-  total_bands_processed = 0
-  total_tabs_found = 0
-  total_files_downloaded = 0
-  
-  for band_file in band_files:
-    try:
-      # Load band data from JSON
-      with open(band_file, 'r', encoding='utf-8') as f:
-        band_data = json.load(f)
+  if num_threads > 1:
+    print(f"Using {num_threads} parallel threads for processing")
+    
+    # Split band files into chunks for parallel processing
+    chunk_size = len(band_files) // num_threads
+    if chunk_size == 0:
+      chunk_size = 1
+      num_threads = len(band_files)  # Adjust threads to match available work
+    
+    band_chunks = []
+    for i in range(0, len(band_files), chunk_size):
+      chunk = band_files[i:i + chunk_size]
+      if chunk:  # Only add non-empty chunks
+        band_chunks.append(chunk)
+    
+    # If we have leftover files due to uneven division, distribute them
+    if len(band_chunks) > num_threads:
+      # Merge the last chunk with the second-to-last chunk
+      band_chunks[-2].extend(band_chunks[-1])
+      band_chunks.pop()
+    
+    print(f"Split into {len(band_chunks)} chunks: {[len(chunk) for chunk in band_chunks]}")
+    
+    # Process chunks in parallel using ThreadPoolExecutor
+    total_stats = {
+      'bands_processed': 0,
+      'tabs_found': 0,
+      'files_downloaded': 0
+    }
+    
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+      # Submit all chunks for processing
+      future_to_thread = {
+        executor.submit(
+          process_band_chunk, 
+          chunk, 
+          output_dir, 
+          max_tabs_per_band, 
+          allowed_types, 
+          include_metadata, 
+          i + 1,
+          skip_existing
+        ): i + 1 
+        for i, chunk in enumerate(band_chunks)
+      }
       
-      # Reconstruct Band object
-      band = Band(band_data['id'], band_data['name'], band_data['url'])
-      
-      # Reconstruct Tab objects
-      if 'tabs' in band_data and band_data['tabs']:
-        tabs_to_process = band_data['tabs']
+      # Collect results as they complete
+      for future in as_completed(future_to_thread):
+        thread_id = future_to_thread[future]
+        try:
+          thread_stats = future.result()
+          total_stats['bands_processed'] += thread_stats['bands_processed']
+          total_stats['tabs_found'] += thread_stats['tabs_found']
+          total_stats['files_downloaded'] += thread_stats['files_downloaded']
+          print(f"Thread {thread_id} completed: {thread_stats['bands_processed']} bands, "
+                f"{thread_stats['tabs_found']} tabs, {thread_stats['files_downloaded']} downloads")
+        except Exception as e:
+          print(f"Thread {thread_id} failed with error: {e}")
+    
+    total_bands_processed = total_stats['bands_processed']
+    total_tabs_found = total_stats['tabs_found']
+    total_files_downloaded = total_stats['files_downloaded']
+    
+  else:
+    # Single-threaded processing (original behavior)
+    print("Using single-threaded processing")
+    
+    total_bands_processed = 0
+    total_tabs_found = 0
+    total_files_downloaded = 0
+    
+    for band_file in band_files:
+      try:
+        # Load band data from JSON
+        with open(band_file, 'r', encoding='utf-8') as f:
+          band_data = json.load(f)
         
-        # Limit tabs if specified
-        if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
-          print(f"  Limiting to {max_tabs_per_band} tabs for {band.name} (found {len(tabs_to_process)})")
-          # Take the first N tabs
-          tabs_items = list(tabs_to_process.items())[:max_tabs_per_band]
-          tabs_to_process = dict(tabs_items)
+        # Reconstruct Band object
+        band = Band(band_data['id'], band_data['name'], band_data['url'])
         
-        for tab_id, tab_data in tabs_to_process.items():
-          # Always skip OFFICIAL tabs
-          if tab_data['type'].upper() == 'OFFICIAL':
-            continue
+        # Reconstruct Tab objects
+        if 'tabs' in band_data and band_data['tabs']:
+          tabs_to_process = band_data['tabs']
           
-          # Filter by allowed types if specified
-          if allowed_types and tab_data['type'].upper() not in [t.upper() for t in allowed_types]:
-            continue  # Skip this tab if its type is not in the allowed list
+          # Limit tabs if specified
+          if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
+            print(f"  Limiting to {max_tabs_per_band} tabs for {band.name} (found {len(tabs_to_process)})")
+            # Take the first N tabs
+            tabs_items = list(tabs_to_process.items())[:max_tabs_per_band]
+            tabs_to_process = dict(tabs_items)
           
-          tab = Tab(tab_data['id'], tab_data['title'], tab_data['type'], tab_data['url'])
-          band.add_tab(tab)
+          for tab_id, tab_data in tabs_to_process.items():
+            # Always skip OFFICIAL tabs
+            if tab_data['type'].upper() == 'OFFICIAL':
+              continue
+            
+            # Filter by allowed types if specified
+            if allowed_types and tab_data['type'].upper() not in [t.upper() for t in allowed_types]:
+              continue  # Skip this tab if its type is not in the allowed list
+            
+            tab = Tab(tab_data['id'], tab_data['title'], tab_data['type'], tab_data['url'])
+            band.add_tab(tab)
+          
+          print(f"Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
+          total_tabs_found += len(band.tabs)
+          
+          # Download tabs for this band
+          download_band_tabs(band, session, output_dir, include_metadata, skip_existing)
+          
+          # Count successful downloads
+          files_downloaded = 0
+          for tab in band.tabs.values():
+            if hasattr(tab, 'file_path') and tab.file_path:
+              files_downloaded += 1
+          
+          total_files_downloaded += files_downloaded
+          
+          # Update the band JSON file with file paths
+          updated_band_data = band.to_dict()
+          with open(band_file, 'w', encoding='utf-8') as f:
+            json.dump(updated_band_data, f, indent=2, ensure_ascii=False)
+          
+          print(f"  Updated band file: {os.path.basename(band_file)}")
+          
+        else:
+          print(f"  No tabs found in band file: {os.path.basename(band_file)}")
         
-        print(f"Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
-        total_tabs_found += len(band.tabs)
+        total_bands_processed += 1
         
-        # Download tabs for this band
-        download_band_tabs(band, session, output_dir, include_metadata)
-        
-        # Count successful downloads
-        files_downloaded = 0
-        for tab in band.tabs.values():
-          if hasattr(tab, 'file_path') and tab.file_path:
-            files_downloaded += 1
-        
-        total_files_downloaded += files_downloaded
-        
-        # Update the band JSON file with file paths
-        updated_band_data = band.to_dict()
-        with open(band_file, 'w', encoding='utf-8') as f:
-          json.dump(updated_band_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"  Updated band file: {os.path.basename(band_file)}")
-        
-      else:
-        print(f"  No tabs found in band file: {os.path.basename(band_file)}")
-      
-      total_bands_processed += 1
-      
-    except Exception as e:
-      print(f"  Error processing band file {os.path.basename(band_file)}: {e}")
-      continue
+      except Exception as e:
+        print(f"  Error processing band file {os.path.basename(band_file)}: {e}")
+        continue
   
   # Create download summary
   download_summary = {
@@ -1082,9 +1350,14 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     'download_date': time.strftime('%Y-%m-%d %H:%M:%S'),
     'source_directory': local_files_dir,
     'output_directory': output_dir,
+    'letter_range': {
+      'starting_letter': starting_letter,
+      'end_letter': end_letter
+    },
     'max_tabs_per_band': max_tabs_per_band,
     'max_bands': max_bands,
-    'allowed_tab_types': allowed_types
+    'allowed_tab_types': allowed_types,
+    'num_threads': num_threads
   }
   
   summary_filename = os.path.join(output_dir, "download_summary.json")
@@ -1361,6 +1634,11 @@ def main():
   parser.add_argument('--download-only', action='store_true', help='Only download tabs using existing local artist files, skip scraping')
   parser.add_argument('--local-files-dir', type=str, default=None, help='Directory containing local artist JSON files (for --download-only mode)')
   parser.add_argument('--skip-existing-bands', action='store_true', help='Skip bands that already have JSON files or entries in summary file (default: False)')
+  parser.add_argument('--threads', type=int, default=1, help='Number of parallel threads for download-only mode (default: 1)')
+  
+  # Tab file handling
+  parser.add_argument('--skip-existing-tabs', dest='skip_existing_tabs', action='store_true', default=True, help='Skip downloading tabs if file already exists on disk (default: True)')
+  parser.add_argument('--overwrite-existing-tabs', dest='skip_existing_tabs', action='store_false', help='Overwrite existing tab files on disk (opposite of --skip-existing-tabs)')
   
   # Legacy compatibility
   parser.add_argument('--skip-downloads', action='store_true', help='Legacy: same as --scrape-only (for backward compatibility)')
@@ -1379,6 +1657,13 @@ def main():
   if args.download_only and not args.local_files_dir:
     args.local_files_dir = args.outdir
     print(f"Note: Using output directory as local files directory: {args.local_files_dir}")
+  
+  if args.threads < 1:
+    print("Error: --threads must be at least 1")
+    return
+  
+  if args.threads > 1 and not args.download_only:
+    print("Warning: --threads only applies to download-only mode, ignoring for scraping mode")
 
   # Configure global retry settings
   global DEFAULT_RETRY_CONFIG
@@ -1407,14 +1692,21 @@ def main():
       print("=== Download-Only Mode ===")
       print(f"Processing local artist files from: {args.local_files_dir}")
       print(f"Output directory: {args.outdir}")
+      print(f"Letter range: '{args.starting_letter}' to '{args.end_letter}'")
       if args.max_bands:
         print(f"Max bands to process: {args.max_bands}")
       if args.tab_types:
         print(f"Tab types filter: {', '.join(args.tab_types)}")
       if args.max_tabs_per_band:
         print(f"Max tabs per band: {args.max_tabs_per_band}")
+      if args.threads > 1:
+        print(f"Parallel threads: {args.threads}")
+      if not args.skip_existing_tabs:
+        print("Tab file handling: Overwrite existing files")
+      else:
+        print("Tab file handling: Skip existing files")
       
-      process_local_artist_files(args.local_files_dir, args.outdir, session, args.max_tabs_per_band, args.max_bands, args.tab_types, args.include_metadata)
+      process_local_artist_files(args.local_files_dir, args.outdir, session, args.max_tabs_per_band, args.max_bands, args.tab_types, args.include_metadata, args.threads, args.starting_letter, args.end_letter, args.skip_existing_tabs)
       
     else:
       # Scraping mode (with or without downloads)
@@ -1433,6 +1725,10 @@ def main():
         print("Full mode: scraping + downloading")
         if args.max_tabs_per_band:
           print(f"Max tabs per band: {args.max_tabs_per_band}")
+        if not args.skip_existing_tabs:
+          print("Tab file handling: Overwrite existing files")
+        else:
+          print("Tab file handling: Skip existing files")
       
       # Load existing bands if skip-existing is enabled
       existing_bands = set()
@@ -1456,7 +1752,7 @@ def main():
           
           # Download tabs if not in scrape-only mode
           if not args.scrape_only:
-            download_band_tabs(band, session, args.outdir, args.include_metadata)
+            download_band_tabs(band, session, args.outdir, args.include_metadata, args.skip_existing_tabs)
           
           # Save band data to individual JSON file
           band_filename = os.path.join(args.outdir, f"band_{band_id}.json")

@@ -29,6 +29,7 @@ Docker container for that use case.
 | `--download-only` | `False` | Only download using existing metadata files |
 | `--local-files-dir` | Value of `--outdir` | Directory with local artist JSON files |
 | `--skip-existing-bands` | `False` | Skip bands that already have JSON files |
+| `--threads` | `1` | Number of parallel threads for download-only mode |
 
 ## Environment Setup
 
@@ -81,6 +82,9 @@ python main.py --scrape-only --max-bands 10 --outdir ./metadata
 # Download-only mode (using existing metadata)
 python main.py --download-only --local-files-dir ./metadata --outdir ./tabs
 
+# Download-only mode with parallel processing (4 threads)
+python main.py --download-only --local-files-dir ./metadata --outdir ./tabs --threads 4
+
 # Tab type filtering (chord charts only)
 python main.py --tab-types CRD --max-bands 5 --outdir ./chords
 
@@ -103,6 +107,8 @@ docker run --rm -v $(pwd)/metadata:/app/output riggi/ug-archive python main.py -
 # Download-only mode (using existing metadata)
 docker run --rm -v $(pwd)/data:/app/output riggi/ug-archive python main.py --download-only --local-files-dir /app/output --outdir /app/output
 
+# Download-only mode with parallel processing (4 threads)
+docker run --rm -v $(pwd)/data:/app/output riggi/ug-archive python main.py --download-only --local-files-dir /app/output --outdir /app/output --threads 4
 # Tab type filtering (chord charts only)
 docker run --rm -v $(pwd)/chords:/app/output riggi/ug-archive python main.py --tab-types CRD --max-bands 5 --outdir /app/output
 
