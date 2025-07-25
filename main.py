@@ -394,7 +394,7 @@ class Tab:
     self.title = title
     self.type = type
     self.url = url
-  def download(self, session, include_metadata=False):
+  def download(self, session, include_metadata=False, verbose=True):
     '''
     Downloads the tab content using the provided session.
     The method will depend on the tab type. This function will call the appropriate download method based on the type.
@@ -405,17 +405,17 @@ class Tab:
     the unordered list element with class `tabHeader-info` and included in the text file if include_metadata is True.
     '''
     if self.type.upper() in ['PRO', 'PWR']:
-      result = self._download_pro_tab(session)
+      result = self._download_pro_tab(session, verbose)
       if result and isinstance(result, dict):
         # Store the extension info for later use
         self._pro_download_info = result
         return result['content']
       return result
     else:
-      return self._download_regular_tab(session, include_metadata)
+      return self._download_regular_tab(session, include_metadata, verbose)
   
   @with_retry(config=DEFAULT_RETRY_CONFIG)
-  def _download_pro_tab(self, session):
+  def _download_pro_tab(self, session, verbose=True):
     '''Download PRO tab as binary file using form submission'''
     try:
       # First get the tab page to find the download form
@@ -440,11 +440,13 @@ class Tab:
       
       try:
         js_results = validate_js_loading(session, validators)
-        print(f"      JS Validation: Download container: {js_results.get('hasDownloadContainer')}, "
-              f"Form: {js_results.get('hasDownloadForm')}, "
-              f"DOM ready: {js_results.get('domReady')}")
+        if verbose:
+          print(f"      JS Validation: Download container: {js_results.get('hasDownloadContainer')}, "
+                f"Form: {js_results.get('hasDownloadForm')}, "
+                f"DOM ready: {js_results.get('domReady')}")
       except Exception as e:
-        print(f"      JavaScript validation failed for PRO tab {self.id}: {e}")
+        if verbose:
+          print(f"      JavaScript validation failed for PRO tab {self.id}: {e}")
         return None
       
       soup = BeautifulSoup(response.content, 'html.parser')
@@ -511,7 +513,7 @@ class Tab:
       return None
   
   @with_retry(config=DEFAULT_RETRY_CONFIG)
-  def _download_regular_tab(self, session, include_metadata=False):
+  def _download_regular_tab(self, session, include_metadata=False, verbose=True):
     '''Download regular tab as text from main tab page using tabContent-code (mobile version)'''
     try:
       # Use the actual tab URL from the scraped data
@@ -538,16 +540,18 @@ class Tab:
       
       try:
         js_results = validate_js_loading(session, validators)
-        content_preview = session.driver.execute_script("""
-          const tabContentCode = document.querySelector('code.tabContent-code');
-          return tabContentCode ? tabContentCode.textContent.substring(0, 100) : null;
-        """)
-        
-        print(f"      JS Validation: Tab content code: {js_results.get('hasTabContentCode')}, "
-              f"Content preview: {content_preview[:50] if content_preview else 'None'}..., "
-              f"DOM ready: {js_results.get('domReady')}")
+        if verbose:
+          content_preview = session.driver.execute_script("""
+            const tabContentCode = document.querySelector('code.tabContent-code');
+            return tabContentCode ? tabContentCode.textContent.substring(0, 100) : null;
+          """)
+          
+          print(f"      JS Validation: Tab content code: {js_results.get('hasTabContentCode')}, "
+                f"Content preview: {content_preview[:50] if content_preview else 'None'}..., "
+                f"DOM ready: {js_results.get('domReady')}")
       except Exception as e:
-        print(f"      JavaScript validation failed for regular tab {self.id}: {e}")
+        if verbose:
+          print(f"      JavaScript validation failed for regular tab {self.id}: {e}")
         return None
       
       soup = BeautifulSoup(response.content, 'html.parser')
@@ -640,7 +644,7 @@ class Tab:
     lines.append("=" * 20)
     
     return "\n".join(lines)
-  def save_to_disk(self, session, artist_folder, include_metadata=False, skip_existing=True):
+  def save_to_disk(self, session, artist_folder, include_metadata=False, skip_existing=True, verbose=True):
     '''
     Downloads and saves the tab content to disk.
     Returns the file path if successful, None otherwise.
@@ -650,6 +654,7 @@ class Tab:
       artist_folder: Directory to save the tab file
       include_metadata: Whether to include metadata in the file
       skip_existing: Skip download if file already exists (default: True)
+      verbose: Whether to print detailed progress information (default: True)
     '''
     try:
       # Create a safe filename from title and type
@@ -670,14 +675,17 @@ class Tab:
       file_exists = os.path.exists(filepath)
       if file_exists:
         if skip_existing:
-          print(f"      File already exists, skipping: {filename}")
+          if verbose:
+            print(f"      File already exists, skipping: {filename}")
           return filepath
         else:
-          print(f"      File already exists, overwriting: {filename}")
+          if verbose:
+            print(f"      File already exists, overwriting: {filename}")
       # Download the tab content
-      content = self.download(session, include_metadata)
+      content = self.download(session, include_metadata, verbose)
       if content is None:
-        print(f"      Failed to download tab {self.id}")
+        if verbose:
+          print(f"      Failed to download tab {self.id}")
         return None
       
       # Write content to file
@@ -690,14 +698,17 @@ class Tab:
       # Verify file was written
       if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
         action = "Overwritten" if file_exists and not skip_existing else "Saved"
-        print(f"      {action}: {filename} ({os.path.getsize(filepath)} bytes)")
+        if verbose:
+          print(f"      {action}: {filename} ({os.path.getsize(filepath)} bytes)")
         return filepath
       else:
-        print(f"      Failed to save file or file is empty: {filename}")
+        if verbose:
+          print(f"      Failed to save file or file is empty: {filename}")
         return None
       
     except Exception as e:
-      print(f"      Error saving tab {self.id}: {e}")
+      if verbose:
+        print(f"      Error saving tab {self.id}: {e}")
       return None
   
   def _detect_pro_file_extension(self):
@@ -979,7 +990,7 @@ def get_band_letter_category(band_name):
     # Anything else (numbers, symbols, non-Latin characters) goes to '0-9'
     return '0-9'
 
-def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_existing=True, progress_callback=None, current_tab_count=0):
+def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_existing=True, progress_callback=None, thread_id=None):
   '''
   Downloads all tabs for a given band and saves them to disk.
   Creates a folder for the band and saves each tab as a separate file.
@@ -991,14 +1002,18 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
     base_outdir: Base output directory
     include_metadata: Whether to include metadata in tab files
     skip_existing: Skip download if file already exists
-    progress_callback: Function to call for progress updates (tab_num, total_tabs)
-    current_tab_count: Current tab number (for progress tracking)
+    progress_callback: Function to call for progress updates (increment-based)
+    thread_id: Thread identifier (None if single-threaded, reduces verbosity if set)
   
   Returns:
     int: Number of tabs processed
   '''
+  # Determine verbosity based on threading mode
+  verbose = thread_id is None  # Verbose only in single-threaded mode
+  
   if not hasattr(band, 'tabs') or not band.tabs:
-    print(f"  No tabs to download for {band.name}")
+    if verbose:
+      print(f"  No tabs to download for {band.name}")
     return
   
   # Create safe folder name for the band
@@ -1009,7 +1024,8 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
   if not os.path.exists(band_folder):
     os.makedirs(band_folder)
   
-  print(f"  Downloading {len(band.tabs)} tabs to: {band_folder}")
+  if verbose:
+    print(f"  Downloading {len(band.tabs)} tabs to: {band_folder}")
   
   downloaded_count = 0
   failed_count = 0
@@ -1017,11 +1033,11 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
   
   for i, (tab_id, tab) in enumerate(band.tabs.items()):
     try:
-      # Call progress callback if provided
+      # Call progress callback if provided (increment by 1 for each tab processed)
       if progress_callback:
-        progress_callback(current_tab_count + i + 1)
+        progress_callback(1)
         
-      file_path = tab.save_to_disk(session, band_folder, include_metadata, skip_existing)
+      file_path = tab.save_to_disk(session, band_folder, include_metadata, skip_existing, verbose)
       if file_path:
         tab.file_path = file_path
         downloaded_count += 1
@@ -1030,15 +1046,17 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
       
       tabs_processed += 1
     except Exception as e:
-      print(f"      Error downloading tab {tab_id}: {e}")
+      if verbose:
+        print(f"      Error downloading tab {tab_id}: {e}")
       failed_count += 1
       tabs_processed += 1
   
-  print(f"  Downloaded: {downloaded_count} tabs, Failed: {failed_count} tabs")
+  if verbose:
+    print(f"  Downloaded: {downloaded_count} tabs, Failed: {failed_count} tabs")
   return tabs_processed
 
 
-def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True, progress_callback=None, initial_tab_count=0):
+def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True, progress_callback=None):
   """
   Process a chunk of band files in a single thread.
   Each thread gets its own Selenium session to avoid conflicts.
@@ -1052,7 +1070,6 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
     thread_id: Thread identifier for logging
     skip_existing: Skip download if file already exists
     progress_callback: Function to call for progress updates
-    initial_tab_count: Starting tab count for this chunk
   """
   # Create a separate Selenium session for this thread
   session = SeleniumSession()
@@ -1064,8 +1081,6 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
       'files_downloaded': 0,
       'thread_id': thread_id
     }
-    
-    current_tab_count = initial_tab_count
     
     print(f"Thread {thread_id}: Processing {len(band_files_chunk)} band files")
     
@@ -1105,8 +1120,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
           thread_stats['tabs_found'] += len(band.tabs)
           
           # Download tabs for this band
-          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, current_tab_count)
-          current_tab_count += tabs_processed
+          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, thread_id)
           
           # Count successful downloads
           files_downloaded = 0
@@ -1253,14 +1267,19 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     import threading
     progress_lock = threading.Lock()
   
-  def progress_callback(current_tab):
+  def progress_callback(increment=1):
+    """
+    Thread-safe progress callback that increments the counter.
+    Args:
+      increment (int): Number of tabs to add to progress (default: 1)
+    """
     nonlocal processed_tabs
     if progress_lock:
       with progress_lock:
-        processed_tabs = current_tab
+        processed_tabs += increment
         print(f"\rProgress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
     else:
-      processed_tabs = current_tab
+      processed_tabs += increment
       print(f"\rProgress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
   
   if num_threads > 1:
@@ -1293,32 +1312,6 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
       'files_downloaded': 0
     }
     
-    # Calculate initial tab counts for each chunk
-    chunk_tab_starts = []
-    current_count = 0
-    for chunk in band_chunks:
-      chunk_tab_starts.append(current_count)
-      # Count tabs in this chunk
-      for band_file in chunk:
-        try:
-          with open(band_file, 'r', encoding='utf-8') as f:
-            band_data = json.load(f)
-          
-          if 'tabs' in band_data and band_data['tabs']:
-            tabs_to_process = band_data['tabs']
-            
-            if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
-              tabs_to_process = dict(list(tabs_to_process.items())[:max_tabs_per_band])
-            
-            for tab_data in tabs_to_process.values():
-              if tab_data['type'].upper() == 'OFFICIAL':
-                continue
-              if allowed_types and tab_data['type'].upper() not in [t.upper() for t in allowed_types]:
-                continue
-              current_count += 1
-        except:
-          continue
-    
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
       # Submit all chunks for processing
       future_to_thread = {
@@ -1331,8 +1324,7 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           include_metadata, 
           i + 1,
           skip_existing,
-          progress_callback,
-          chunk_tab_starts[i]
+          progress_callback
         ): i + 1 
         for i, chunk in enumerate(band_chunks)
       }
@@ -1398,9 +1390,8 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           print(f"Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
           total_tabs_found += len(band.tabs)
           
-          # Download tabs for this band
-          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, current_tab_count)
-          current_tab_count += tabs_processed
+          # Download tabs for this band (single-threaded mode, verbose=True)
+          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, None)
           
           # Count successful downloads
           files_downloaded = 0
