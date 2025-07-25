@@ -684,7 +684,6 @@ class Tab:
           return filepath
         else:
           print(f"      File already exists, overwriting: {filename}")
-      
       # Download the tab content
       content = self.download(session, include_metadata)
       if content is None:
@@ -1027,10 +1026,6 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
   
   for i, (tab_id, tab) in enumerate(band.tabs.items()):
     try:
-      # Add a small delay between downloads to be respectful to the server
-      if i > 0:
-        time.sleep(1)  # 1 second delay between downloads
-      
       # Call progress callback if provided
       if progress_callback:
         progress_callback(current_tab_count + i + 1)
