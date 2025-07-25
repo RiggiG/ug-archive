@@ -117,10 +117,22 @@ def update_json_file_paths(directory, old_filepath, new_filepath):
         updated = False
         if 'tabs' in band_data and tab_id in band_data['tabs']:
             tab_data = band_data['tabs'][tab_id]
-            if 'file_path' in tab_data and tab_data['file_path'] == old_filepath:
-                tab_data['file_path'] = new_filepath
-                updated = True
-                print(f"    Updated JSON reference in {json_filename}")
+            if 'file_path' in tab_data:
+                stored_path = tab_data['file_path']
+                stored_basename = os.path.basename(stored_path)
+                old_basename = os.path.basename(old_filepath)
+                
+                # Check if the basename matches (handles both absolute and relative paths)
+                if stored_basename == old_basename:
+                    # Update just the basename, keeping the directory structure
+                    new_basename = os.path.basename(new_filepath)
+                    updated_path = os.path.join(os.path.dirname(stored_path), new_basename)
+                    tab_data['file_path'] = updated_path
+                    
+                    updated = True
+                    print(f"    Updated JSON reference in {json_filename}")
+                    print(f"      Old path: {stored_path}")
+                    print(f"      New path: {updated_path}")
         
         # Write back if updated
         if updated:
