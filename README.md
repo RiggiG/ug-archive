@@ -30,6 +30,8 @@ Docker container for that use case.
 | `--local-files-dir` | Value of `--outdir` | Directory with local artist JSON files |
 | `--skip-existing-bands` | `False` | Skip bands that already have JSON files |
 | `--threads` | `1` | Number of parallel threads for download-only mode |
+| `--skip-existing-tabs` | `True` | Skip downloading tabs if file already exists |
+| `--overwrite-existing-tabs` | N/A | Overwrite existing tab files (opposite of --skip-existing-tabs) |
 
 ## Environment Setup
 
@@ -118,6 +120,18 @@ docker run --rm -v $(pwd)/output:/app/output riggi/ug-archive python main.py --s
 # Include metadata headers in downloaded tab files
 docker run --rm -v $(pwd)/tabs_with_metadata:/app/output riggi/ug-archive python main.py --include-metadata --max-bands 3 --outdir /app/output
 ```
+
+## Features
+
+### Progress Monitoring
+In download-only mode, the scraper displays real-time progress showing the current tab being processed out of the total number of tabs:
+```
+Progress: 1523/5000 tabs processed
+```
+
+### Tab File Handling
+- `--skip-existing-tabs` (default): Skip downloading if file already exists
+- `--overwrite-existing-tabs`: Overwrite existing files, opposite of skip behavior
 
 ## Output Structure
 

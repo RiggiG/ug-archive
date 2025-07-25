@@ -667,7 +667,7 @@ class Tab:
       safe_type = self._sanitize_filename(self.type)
       
       # Determine file extension based on type
-      if self.type.upper() == 'PRO':
+      if self.type.upper() in ['PRO', 'PWR']:
         extension = self._detect_pro_file_extension()
       else:
         extension = '.txt'  # Text files for regular tabs
@@ -776,7 +776,11 @@ class Tab:
         elif b'ptab' in content[:20].lower():
           return '.ptb'
     
-    # Default fallback
+    # Check if this is a PWR tab and use appropriate default
+    if hasattr(self, 'type') and self.type.upper() == 'PWR':
+      return '.ptb'
+    
+    # Default fallback for PRO tabs
     return '.gp5'
   
   def _sanitize_filename(self, filename):
@@ -985,7 +989,7 @@ def get_band_letter_category(band_name):
     # Anything else (numbers, symbols, non-Latin characters) goes to '0-9'
     return '0-9'
 
-def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_existing=True):
+def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_existing=True, progress_callback=None, current_tab_count=0):
   '''
   Downloads all tabs for a given band and saves them to disk.
   Creates a folder for the band and saves each tab as a separate file.
@@ -997,6 +1001,11 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
     base_outdir: Base output directory
     include_metadata: Whether to include metadata in tab files
     skip_existing: Skip download if file already exists
+    progress_callback: Function to call for progress updates (tab_num, total_tabs)
+    current_tab_count: Current tab number (for progress tracking)
+  
+  Returns:
+    int: Number of tabs processed
   '''
   if not hasattr(band, 'tabs') or not band.tabs:
     print(f"  No tabs to download for {band.name}")
@@ -1014,12 +1023,17 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
   
   downloaded_count = 0
   failed_count = 0
+  tabs_processed = 0
   
   for i, (tab_id, tab) in enumerate(band.tabs.items()):
     try:
       # Add a small delay between downloads to be respectful to the server
       if i > 0:
         time.sleep(1)  # 1 second delay between downloads
+      
+      # Call progress callback if provided
+      if progress_callback:
+        progress_callback(current_tab_count + i + 1)
         
       file_path = tab.save_to_disk(session, band_folder, include_metadata, skip_existing)
       if file_path:
@@ -1027,14 +1041,18 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
         downloaded_count += 1
       else:
         failed_count += 1
+      
+      tabs_processed += 1
     except Exception as e:
       print(f"      Error downloading tab {tab_id}: {e}")
       failed_count += 1
+      tabs_processed += 1
   
   print(f"  Downloaded: {downloaded_count} tabs, Failed: {failed_count} tabs")
+  return tabs_processed
 
 
-def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True):
+def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True, progress_callback=None, initial_tab_count=0):
   """
   Process a chunk of band files in a single thread.
   Each thread gets its own Selenium session to avoid conflicts.
@@ -1047,6 +1065,8 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
     include_metadata: Whether to include metadata in files
     thread_id: Thread identifier for logging
     skip_existing: Skip download if file already exists
+    progress_callback: Function to call for progress updates
+    initial_tab_count: Starting tab count for this chunk
   """
   # Create a separate Selenium session for this thread
   session = SeleniumSession()
@@ -1058,6 +1078,8 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
       'files_downloaded': 0,
       'thread_id': thread_id
     }
+    
+    current_tab_count = initial_tab_count
     
     print(f"Thread {thread_id}: Processing {len(band_files_chunk)} band files")
     
@@ -1097,7 +1119,8 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
           thread_stats['tabs_found'] += len(band.tabs)
           
           # Download tabs for this band
-          download_band_tabs(band, session, output_dir, include_metadata, skip_existing)
+          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, current_tab_count)
+          current_tab_count += tabs_processed
           
           # Count successful downloads
           files_downloaded = 0
@@ -1209,6 +1232,51 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
   
   print(f"Found {len(band_files)} band files to process")
   
+  # Count total tabs for progress tracking
+  print("Counting total tabs for progress tracking...")
+  total_tabs = 0
+  for band_file in band_files:
+    try:
+      with open(band_file, 'r', encoding='utf-8') as f:
+        band_data = json.load(f)
+      
+      if 'tabs' in band_data and band_data['tabs']:
+        tabs_to_process = band_data['tabs']
+        
+        # Apply same filtering as in processing
+        if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
+          tabs_to_process = dict(list(tabs_to_process.items())[:max_tabs_per_band])
+        
+        # Count tabs that would actually be processed
+        for tab_data in tabs_to_process.values():
+          if tab_data['type'].upper() == 'OFFICIAL':
+            continue
+          if allowed_types and tab_data['type'].upper() not in [t.upper() for t in allowed_types]:
+            continue
+          total_tabs += 1
+    except Exception as e:
+      print(f"  Warning: Could not count tabs in {os.path.basename(band_file)}: {e}")
+      continue
+  
+  print(f"Total tabs to process: {total_tabs}")
+  
+  # Create progress tracking variables
+  processed_tabs = 0
+  progress_lock = None
+  if num_threads > 1:
+    import threading
+    progress_lock = threading.Lock()
+  
+  def progress_callback(current_tab):
+    nonlocal processed_tabs
+    if progress_lock:
+      with progress_lock:
+        processed_tabs = current_tab
+        print(f"\rProgress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
+    else:
+      processed_tabs = current_tab
+      print(f"\rProgress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
+  
   if num_threads > 1:
     print(f"Using {num_threads} parallel threads for processing")
     
@@ -1239,6 +1307,32 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
       'files_downloaded': 0
     }
     
+    # Calculate initial tab counts for each chunk
+    chunk_tab_starts = []
+    current_count = 0
+    for chunk in band_chunks:
+      chunk_tab_starts.append(current_count)
+      # Count tabs in this chunk
+      for band_file in chunk:
+        try:
+          with open(band_file, 'r', encoding='utf-8') as f:
+            band_data = json.load(f)
+          
+          if 'tabs' in band_data and band_data['tabs']:
+            tabs_to_process = band_data['tabs']
+            
+            if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
+              tabs_to_process = dict(list(tabs_to_process.items())[:max_tabs_per_band])
+            
+            for tab_data in tabs_to_process.values():
+              if tab_data['type'].upper() == 'OFFICIAL':
+                continue
+              if allowed_types and tab_data['type'].upper() not in [t.upper() for t in allowed_types]:
+                continue
+              current_count += 1
+        except:
+          continue
+    
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
       # Submit all chunks for processing
       future_to_thread = {
@@ -1250,7 +1344,9 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           allowed_types, 
           include_metadata, 
           i + 1,
-          skip_existing
+          skip_existing,
+          progress_callback,
+          chunk_tab_starts[i]
         ): i + 1 
         for i, chunk in enumerate(band_chunks)
       }
@@ -1279,6 +1375,7 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     total_bands_processed = 0
     total_tabs_found = 0
     total_files_downloaded = 0
+    current_tab_count = 0
     
     for band_file in band_files:
       try:
@@ -1316,7 +1413,8 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           total_tabs_found += len(band.tabs)
           
           # Download tabs for this band
-          download_band_tabs(band, session, output_dir, include_metadata, skip_existing)
+          tabs_processed = download_band_tabs(band, session, output_dir, include_metadata, skip_existing, progress_callback, current_tab_count)
+          current_tab_count += tabs_processed
           
           # Count successful downloads
           files_downloaded = 0
@@ -1342,6 +1440,10 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
         print(f"  Error processing band file {os.path.basename(band_file)}: {e}")
         continue
   
+  # Print final newline to complete progress display
+  if total_tabs > 0:
+    print()  # New line after progress
+    
   # Create download summary
   download_summary = {
     'total_bands_processed': total_bands_processed,
@@ -1752,7 +1854,7 @@ def main():
           
           # Download tabs if not in scrape-only mode
           if not args.scrape_only:
-            download_band_tabs(band, session, args.outdir, args.include_metadata, args.skip_existing_tabs)
+            download_band_tabs(band, session, args.outdir, args.include_metadata, args.skip_existing_tabs, None, 0)
           
           # Save band data to individual JSON file
           band_filename = os.path.join(args.outdir, f"band_{band_id}.json")
