@@ -1874,8 +1874,8 @@ def main():
   parser.add_argument('--include-metadata', action='store_true', help='Include metadata header in downloaded tab files (default: False)')
   
   # Retry configuration
-  parser.add_argument('--max-retry-attempts', type=int, default=3, help='Maximum number of retry attempts for failed requests (default: 3)')
-  parser.add_argument('--retry-base-delay', type=float, default=1.0, help='Base delay in seconds for exponential backoff (default: 1.0)')
+  parser.add_argument('--max-retry-attempts', type=int, default=4, help='Maximum number of retry attempts for failed requests (default: 4)')
+  parser.add_argument('--retry-base-delay', type=float, default=2.0, help='Base delay in seconds for exponential backoff (default: 2.0)')
   parser.add_argument('--retry-max-delay', type=float, default=30.0, help='Maximum delay in seconds for exponential backoff (default: 30.0)')
   parser.add_argument('--disable-retry-jitter', action='store_true', help='Disable random jitter in retry delays (default: enabled)')
   
