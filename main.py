@@ -1239,7 +1239,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
       'thread_id': thread_id
     }
     
-    print(f"\nThread {thread_id}: Processing {len(band_files_chunk)} band files")
+    print(f"Thread {thread_id}: Processing {len(band_files_chunk)} band files")
     
     for band_file in band_files_chunk:
       try:
@@ -1256,7 +1256,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
           
           # Limit tabs if specified
           if max_tabs_per_band and len(tabs_to_process) > max_tabs_per_band:
-            print(f"\nThread {thread_id}: Limiting to {max_tabs_per_band} tabs for {band.name} (found {len(tabs_to_process)})")
+            print(f"Thread {thread_id}: Limiting to {max_tabs_per_band} tabs for {band.name} (found {len(tabs_to_process)})")
             # Take the first N tabs
             tabs_items = list(tabs_to_process.items())[:max_tabs_per_band]
             tabs_to_process = dict(tabs_items)
@@ -1273,7 +1273,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
             tab = Tab(tab_data['id'], tab_data['title'], tab_data['type'], tab_data['url'])
             band.add_tab(tab)
           
-          print(f"\nThread {thread_id}: Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
+          print(f"Thread {thread_id}: Processing band: {band.name} ({band.id}) - {len(band.tabs)} tabs")
           thread_stats['tabs_found'] += len(band.tabs)
           
           # Download tabs for this band with adaptive delay tracking
@@ -1288,18 +1288,18 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
           with open(band_file, 'w', encoding='utf-8') as f:
             json.dump(updated_band_data, f, indent=2, ensure_ascii=False)
           
-          print(f"\nThread {thread_id}: Updated band file: {os.path.basename(band_file)}")
+          print(f"Thread {thread_id}: Updated band file: {os.path.basename(band_file)}")
           
         else:
-          print(f"\nThread {thread_id}: No tabs found in band file: {os.path.basename(band_file)}")
+          print(f"Thread {thread_id}: No tabs found in band file: {os.path.basename(band_file)}")
         
         thread_stats['bands_processed'] += 1
         
       except Exception as e:
-        print(f"\nThread {thread_id}: Error processing band file {os.path.basename(band_file)}: {e}")
+        print(f"Thread {thread_id}: Error processing band file {os.path.basename(band_file)}: {e}")
         continue
     
-    print(f"\nThread {thread_id}: Completed processing {thread_stats['bands_processed']} bands")
+    print(f"Thread {thread_id}: Completed processing {thread_stats['bands_processed']} bands")
     return thread_stats
     
   finally:
@@ -1307,7 +1307,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
     try:
       session.close()
     except Exception as e:
-      print(f"\nThread {thread_id}: Error closing session: {e}")
+      print(f"Thread {thread_id}: Error closing session: {e}")
 
 
 def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False, num_threads=1, starting_letter='0-9', end_letter='z', skip_existing=True, disable_adaptive_delay=False):
@@ -1430,10 +1430,10 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     if progress_lock:
       with progress_lock:
         processed_tabs += increment
-        print(f"\rProgress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
+        print(f"Progress: {processed_tabs}/{total_tabs} tabs processed")
     else:
       processed_tabs += increment
-      print(f"\rProgress: {processed_tabs}/{total_tabs} tabs processed", end='', flush=True)
+      print(f"Progress: {processed_tabs}/{total_tabs} tabs processed")
   
   if num_threads > 1:
     print(f"Using {num_threads} parallel threads for processing")
@@ -1502,11 +1502,11 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           total_stats['tabs_found'] += thread_stats['tabs_found']
           total_stats['files_downloaded'] += thread_stats['files_downloaded']
           total_stats['files_failed'] += thread_stats.get('files_failed', 0)
-          print(f"\nThread {thread_id} completed: {thread_stats['bands_processed']} bands, "
+          print(f"Thread {thread_id} completed: {thread_stats['bands_processed']} bands, "
                 f"{thread_stats['tabs_found']} tabs, {thread_stats['files_downloaded']} downloads, "
                 f"{thread_stats.get('files_failed', 0)} failures")
         except Exception as e:
-          print(f"\nThread {thread_id} failed with error: {e}")
+          print(f"Thread {thread_id} failed with error: {e}")
     
     # Print final delay tracker statistics (if enabled)
     if delay_tracker:
