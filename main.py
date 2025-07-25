@@ -704,15 +704,20 @@ class Tab:
     '''
     Detect the file extension for PRO tabs based on download info.
     Supports multiple methods for detection:
-    1. Content-Disposition header filename
-    2. URL path extension
-    3. Content-Type header
-    4. File signature/magic bytes (GP4/5/6/7, TuxGuitar, PowerTab)
+    1. Tab type (PWR tabs always get .ptb)
+    2. Content-Disposition header filename
+    3. URL path extension
+    4. Content-Type header
+    5. File signature/magic bytes (GP4/5/6/7, TuxGuitar, PowerTab)
     
     Returns appropriate extension (.gp4, .gp5, .gp6, .gp7, .ptb, .tg, etc.)
     '''
+    # Check if this is a PWR tab first - they always use .ptb
+    if hasattr(self, 'type') and self.type.upper() == 'PWR':
+      return '.ptb'
+    
     if not hasattr(self, '_pro_download_info') or not self._pro_download_info:
-      return '.gp5'  # Default fallback
+      return '.gp5'  # Default fallback for PRO tabs
     
     download_info = self._pro_download_info
     
@@ -764,10 +769,6 @@ class Tab:
         # PowerTab files often start with 'ptab'
         elif b'ptab' in content[:20].lower():
           return '.ptb'
-    
-    # Check if this is a PWR tab and use appropriate default
-    if hasattr(self, 'type') and self.type.upper() == 'PWR':
-      return '.ptb'
     
     # Default fallback for PRO tabs
     return '.gp5'
