@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Helper script to fix PWR tab files that were incorrectly saved with .txt extension.
+Helper script to fix PWR tab files that have incorrect extensions.
 
-This script scans for files matching the pattern *_PWR_*.txt and renames them to .ptb extension.
-It also updates any corresponding JSON files to reflect the new file paths.
+This script scans for files matching the pattern *_PWR_*.* (with any extension except .ptb) 
+and renames them to .ptb extension. It also updates any corresponding JSON files to reflect 
+the new file paths.
 """
 
 import os
@@ -13,20 +14,20 @@ import argparse
 from pathlib import Path
 
 
-def find_pwr_txt_files(directory):
+def find_pwr_files_wrong_extension(directory):
     """
-    Find all files that match the pattern *_PWR_*.txt
+    Find all files that match the pattern *_PWR_*.* but don't have .ptb extension
     
     Args:
         directory (str): Directory to search in
     
     Returns:
-        list: List of file paths that match the PWR pattern with .txt extension
+        list: List of file paths that match the PWR pattern with non-.ptb extensions
     """
     pwr_files = []
     
-    # Pattern to match: <name>_PWR_<id>.txt
-    pwr_pattern = re.compile(r'^(.+)_PWR_(\d+)\.txt$', re.IGNORECASE)
+    # Pattern to match: <name>_PWR_<id>.<any_extension_except_ptb>
+    pwr_pattern = re.compile(r'^(.+)_PWR_(\d+)\.(?!ptb$)[^.]+$', re.IGNORECASE)
     
     for root, dirs, files in os.walk(directory):
         for filename in files:
@@ -39,17 +40,18 @@ def find_pwr_txt_files(directory):
 
 def rename_pwr_file(old_filepath):
     """
-    Rename a PWR file from .txt to .ptb extension
+    Rename a PWR file from any extension to .ptb extension
     
     Args:
-        old_filepath (str): Original file path with .txt extension
+        old_filepath (str): Original file path with non-.ptb extension
     
     Returns:
         str: New file path with .ptb extension, or None if rename failed
     """
     try:
-        # Change extension from .txt to .ptb
-        new_filepath = old_filepath.rsplit('.txt', 1)[0] + '.ptb'
+        # Change extension to .ptb (replace whatever extension it currently has)
+        base_path = os.path.splitext(old_filepath)[0]
+        new_filepath = base_path + '.ptb'
         
         # Check if target file already exists
         if os.path.exists(new_filepath):
@@ -105,8 +107,8 @@ def update_json_file_paths(directory, old_filepath, new_filepath):
         
         # Extract tab ID from the old filepath filename
         tab_filename = os.path.basename(old_filepath)
-        # Pattern: <name>_PWR_<id>.txt
-        id_match = re.search(r'_PWR_(\d+)\.txt$', tab_filename, re.IGNORECASE)
+        # Pattern: <name>_PWR_<id>.<any_extension>
+        id_match = re.search(r'_PWR_(\d+)\.[^.]+$', tab_filename, re.IGNORECASE)
         if not id_match:
             print(f"    Warning: Could not extract tab ID from filename: {tab_filename}")
             return 0
@@ -147,7 +149,7 @@ def update_json_file_paths(directory, old_filepath, new_filepath):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Fix PWR tab files that were incorrectly saved with .txt extension')
+    parser = argparse.ArgumentParser(description='Fix PWR tab files that have incorrect extensions (any extension except .ptb)')
     parser.add_argument('directory', help='Directory to search for PWR files (searches recursively)')
     parser.add_argument('--dry-run', action='store_true', help='Show what would be renamed without actually renaming files')
     parser.add_argument('--update-json', action='store_true', default=True, help='Update JSON files that reference the old file paths (default: True)')
@@ -159,16 +161,16 @@ def main():
         print(f"Error: Directory does not exist: {args.directory}")
         return 1
     
-    print(f"Searching for PWR files with .txt extension in: {args.directory}")
+    print(f"Searching for PWR files with non-.ptb extensions in: {args.directory}")
     
-    # Find all PWR files with .txt extension
-    pwr_files = find_pwr_txt_files(args.directory)
+    # Find all PWR files with non-.ptb extensions
+    pwr_files = find_pwr_files_wrong_extension(args.directory)
     
     if not pwr_files:
-        print("No PWR files with .txt extension found.")
+        print("No PWR files with incorrect extensions found.")
         return 0
     
-    print(f"Found {len(pwr_files)} PWR files with .txt extension:")
+    print(f"Found {len(pwr_files)} PWR files with non-.ptb extensions:")
     
     renamed_files = 0
     json_files_updated = 0
@@ -178,7 +180,8 @@ def main():
         print(f"\nProcessing: {rel_path}")
         
         if args.dry_run:
-            new_filepath = old_filepath.rsplit('.txt', 1)[0] + '.ptb'
+            base_path = os.path.splitext(old_filepath)[0]
+            new_filepath = base_path + '.ptb'
             new_rel_path = os.path.relpath(new_filepath, args.directory)
             print(f"  Would rename to: {new_rel_path}")
         else:
@@ -195,7 +198,7 @@ def main():
     
     print(f"\nSummary:")
     if args.dry_run:
-        print(f"  Would rename {len(pwr_files)} PWR files from .txt to .ptb")
+        print(f"  Would rename {len(pwr_files)} PWR files to .ptb extension")
     else:
         print(f"  Successfully renamed {renamed_files} out of {len(pwr_files)} PWR files")
         if args.update_json:
