@@ -20,16 +20,6 @@ import random
 import functools
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-import os
-import time
-import json
-import re
-import argparse
-import traceback
-import functools
-import random
-import requests
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BANDS = ['0-9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
@@ -135,9 +125,9 @@ def validate_js_loading(session, validators, retry_config=None):
     """
     if retry_config is None:
         retry_config = {
-            'max_attempts': 2,
-            'base_delay': 3.0,
-            'max_delay': 6.0
+            'max_attempts': 3,
+            'base_delay': 4.0,
+            'max_delay': 9.0
         }
     
     @with_retry(config=retry_config, retry_on=(Exception,))
@@ -268,7 +258,7 @@ class SeleniumSession:
       traceback.print_exc()
       raise
   
-  @with_retry(config={'max_attempts': 3, 'base_delay': 2.0})
+  @with_retry(config=DEFAULT_RETRY_CONFIG)
   def get(self, url, wait_for_element=None, timeout=30):
     """
     Navigate to URL and optionally wait for specific element to load
@@ -424,7 +414,7 @@ class Tab:
     else:
       return self._download_regular_tab(session, include_metadata)
   
-  @with_retry(config={'max_attempts': 3, 'base_delay': 1.5})
+  @with_retry(config=DEFAULT_RETRY_CONFIG)
   def _download_pro_tab(self, session):
     '''Download PRO tab as binary file using form submission'''
     try:
@@ -501,7 +491,7 @@ class Tab:
       download_session.headers.update(headers)
       
       # Download with retry
-      @with_retry(config={'max_attempts': 3, 'base_delay': 2.0})
+      @with_retry(config=DEFAULT_RETRY_CONFIG)
       def _download_file():
         download_response = download_session.post(download_url, data=form_data, timeout=30)
         download_response.raise_for_status()
@@ -520,7 +510,7 @@ class Tab:
       print(f"Error downloading PRO tab {self.id}: {e}")
       return None
   
-  @with_retry(config={'max_attempts': 3, 'base_delay': 1.5})
+  @with_retry(config=DEFAULT_RETRY_CONFIG)
   def _download_regular_tab(self, session, include_metadata=False):
     '''Download regular tab as text from main tab page using tabContent-code (mobile version)'''
     try:
@@ -808,7 +798,7 @@ class Tab:
       'metadata': getattr(self, 'metadata', {})
     }
 
-@with_retry(config={'max_attempts': 2, 'base_delay': 5.0})
+@with_retry(config=DEFAULT_RETRY_CONFIG)
 def parse_bands(start, end, session, max_bands=None, existing_bands=None):
   '''
   Base url: /bands/
@@ -1468,7 +1458,7 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
   print(f"Download summary saved to: {summary_filename}")
 
 
-@with_retry(config={'max_attempts': 2, 'base_delay': 3.0})
+@with_retry(config=DEFAULT_RETRY_CONFIG)
 def parse_tabs(band_url, session, max_tabs=None, allowed_types=None):
   '''
   Each artist page contains a paginated list of tabs. The pages are set with a query parameter like `?page=2`, `?page=3`, etc.

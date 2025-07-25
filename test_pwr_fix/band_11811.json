@@ -1,0 +1,23 @@
+{
+  "id": "11811",
+  "name": "10 Years",
+  "url": "https://www.ultimate-guitar.com/artist/11811",
+  "tabs": {
+    "321207": {
+      "id": "321207",
+      "title": "Wasteland",
+      "type": "PWR",
+      "url": "https://tabs.ultimate-guitar.com/tab/321207",
+      "file_path": "/app/output/10_Years_11811/Wasteland_PWR_321207.ptb",
+      "metadata": {}
+    },
+    "123456": {
+      "id": "123456",
+      "title": "Another Song",
+      "type": "TAB",
+      "url": "https://tabs.ultimate-guitar.com/tab/123456",
+      "file_path": "/app/output/10_Years_11811/Another_Song_TAB_123456.txt",
+      "metadata": {}
+    }
+  }
+}
