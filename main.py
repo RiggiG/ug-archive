@@ -776,7 +776,7 @@ class Tab:
     lines.append("=" * 20)
     
     return "\n".join(lines)
-  def save_to_disk(self, session, artist_folder, include_metadata=False, skip_existing=True, verbose=True):
+  def save_to_disk(self, session, artist_folder, include_metadata=False, skip_existing=True, verbose=True, delay_tracker=None):
     '''
     Downloads and saves the tab content to disk.
     Returns the file path if successful, None otherwise.
@@ -787,6 +787,7 @@ class Tab:
       include_metadata: Whether to include metadata in the file
       skip_existing: Skip download if file already exists (default: True)
       verbose: Whether to print detailed progress information (default: True)
+      delay_tracker: AdaptiveDelayTracker instance for failure rate tracking
     '''
     try:
       # Create a safe filename from title and type
@@ -813,9 +814,18 @@ class Tab:
         else:
           if verbose:
             print(f"      File already exists, overwriting: {filename}")
+      
+      # Apply adaptive delay before download if delay tracker is provided
+      if delay_tracker:
+        current_delay = delay_tracker.get_current_delay()
+        if current_delay > 0:
+          time.sleep(current_delay)
+      
       # Download the tab content
       content = self.download(session, include_metadata, verbose)
       if content is None:
+        if delay_tracker:
+          delay_tracker.record_download(False)
         if verbose:
           print(f"      Failed to download tab {self.id}")
         return None
@@ -829,11 +839,15 @@ class Tab:
       
       # Verify file was written
       if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+        if delay_tracker:
+          delay_tracker.record_download(True)
         action = "Overwritten" if file_exists and not skip_existing else "Saved"
         if verbose:
           print(f"      {action}: {filename} ({os.path.getsize(filepath)} bytes)")
         return filepath
       else:
+        if delay_tracker:
+          delay_tracker.record_download(False)
         if verbose:
           print(f"      Failed to save file or file is empty: {filename}")
         return None
@@ -1170,18 +1184,8 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
       if progress_callback:
         progress_callback(1)
       
-      # Apply adaptive delay before download (but after checking for duplicates)
-      if delay_tracker:
-        current_delay = delay_tracker.get_current_delay()
-        if current_delay > 0:
-          time.sleep(current_delay)
-        
-      file_path = tab.save_to_disk(session, band_folder, include_metadata, skip_existing, verbose)
+      file_path = tab.save_to_disk(session, band_folder, include_metadata, skip_existing, verbose, delay_tracker)
       success = file_path is not None
-      
-      # Record the download result for failure tracking
-      if delay_tracker:
-        delay_tracker.record_download(success)
       
       if success:
         tab.file_path = file_path
