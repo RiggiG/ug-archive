@@ -1888,8 +1888,8 @@ def main():
   parser.add_argument('--adaptive-delay-max', type=float, default=10.0, help='Maximum delay between downloads in seconds (default: 10.0)')
   parser.add_argument('--adaptive-delay-threshold', type=float, default=0.2, help='Failure rate threshold for increasing delay (default: 0.2 = 20%%)')
   parser.add_argument('--adaptive-delay-window', type=int, default=50, help='Number of recent downloads to track for failure rate (default: 50)')
-  parser.add_argument('--adaptive-delay-increment', type=float, default=0.5, help='How much to increase delay when failure rate is high (default: 0.5s)')
-  parser.add_argument('--adaptive-delay-decrement', type=float, default=0.1, help='How much to decrease delay when failure rate is low (default: 0.1s)')
+  parser.add_argument('--adaptive-delay-increment', type=float, default=1, help='How much to increase delay when failure rate is high (default: 1s)')
+  parser.add_argument('--adaptive-delay-decrement', type=float, default=0.5, help='How much to decrease delay when failure rate is low (default: 0.5s)')
   parser.add_argument('--adaptive-delay-check-interval', type=int, default=10, help='Check and adjust delay every N downloads (default: 10)')
   parser.add_argument('--disable-adaptive-delay', action='store_true', help='Disable adaptive delay tracking (default: enabled in threaded mode)')
   
