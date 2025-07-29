@@ -24,7 +24,7 @@ from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BANDS = ['0-9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
-
+SKIP_TAB_TYPES = ['OFFICIAL', 'VID']
 # Retry configuration
 DEFAULT_RETRY_CONFIG = {
     'max_attempts': 3,
@@ -1266,8 +1266,8 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
             tabs_to_process = dict(tabs_items)
           
           for tab_id, tab_data in tabs_to_process.items():
-            # Always skip OFFICIAL tabs
-            if tab_data['type'].upper() == 'OFFICIAL':
+            # Always skip OFFICIAL and VID tabs
+            if tab_data['type'].upper() in SKIP_TAB_TYPES:
               continue
             
             # Filter by allowed types if specified
@@ -1750,8 +1750,8 @@ def parse_tabs(band_url, session, max_tabs=None, allowed_types=None):
               tab_type = type_div.get_text(strip=True)
               break
           
-          # Always skip OFFICIAL tabs
-          if tab_type.upper() == 'OFFICIAL':
+          # Always skip OFFICIAL and VID tabs
+          if tab_type.upper() in SKIP_TAB_TYPES:
             continue
           
           # Filter by allowed types if specified
@@ -1897,6 +1897,7 @@ def main():
   parser.add_argument('--scrape-only', action='store_true', help='Only scrape bands and tabs metadata, skip downloading tab content')
   parser.add_argument('--download-only', action='store_true', help='Only download tabs using existing local artist files, skip scraping')
   parser.add_argument('--local-files-dir', type=str, default=None, help='Directory containing local artist JSON files (for --download-only mode)')
+  parser.add_argument('--input-files-dir', type=str, default=None, dest='local_files_dir', help='Directory containing local artist JSON files (for --download-only mode)')
   parser.add_argument('--skip-existing-bands', action='store_true', help='Skip bands that already have JSON files or entries in summary file (default: False)')
   parser.add_argument('--threads', type=int, default=1, help='Number of parallel threads for download-only mode (default: 1)')
   

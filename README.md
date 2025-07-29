@@ -27,7 +27,7 @@ Docker container for that use case.
 | `--disable-retry-jitter` | `False` | Disable random jitter in retry delays |
 | `--scrape-only` | `False` | Only scrape metadata, skip downloading content |
 | `--download-only` | `False` | Only download using existing metadata files |
-| `--local-files-dir` | Value of `--outdir` | Directory with local artist JSON files |
+| `--input-files-dir` | Value of `--outdir` | Directory with preexisting artist JSON files (for read-only use with `--download-only`) |
 | `--skip-existing-bands` | `False` | Skip bands that already have JSON files |
 | `--threads` | `1` | Number of parallel threads for download-only mode |
 | `--skip-existing-tabs` | `True` | Skip downloading tabs if file already exists |
