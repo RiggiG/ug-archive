@@ -873,9 +873,6 @@ class Tab:
     if hasattr(self, 'type') and self.type.upper() == 'PWR':
       return '.ptb'
     
-    if not hasattr(self, '_pro_download_info') or not self._pro_download_info:
-      return '.gp5'  # Default fallback for PRO tabs
-    
     download_info = self._pro_download_info
     
     # Try to get extension from Content-Disposition header
