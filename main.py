@@ -1026,7 +1026,7 @@ def parse_bands(start, end, session, max_bands=None, existing_bands=None):
         response = session.get(url, wait_for_element=wait_element, timeout=30)
         
         # Check for redirect (301 status indicates end of pages)
-        if response.status_code == 301 or '404' in response.text:
+        if response.status_code == 301:
           print(f"  Reached end of pages for '{letter}' at page {page}")
           break
           
