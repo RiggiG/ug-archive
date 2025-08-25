@@ -5,6 +5,7 @@ It will iterate over artists from the /bands/ pages, and then iterate through al
 It uses Selenium WebDriver to handle HTTP requests with JavaScript rendering and argparse for command-line argument parsing.
 '''
 import argparse
+import glob
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -793,27 +794,33 @@ class Tab:
       # Create a safe filename from title and type
       safe_title = self._sanitize_filename(self.title)
       safe_type = self._sanitize_filename(self.type)
+      base_filename = f"{safe_title}_{safe_type}_{self.id}"
+      acceptable_extensions = {
+        "PRO": [".gp3", ".gp4", ".gp5", ".gp6", ".gp7", ".gpx", ".tg"],
+        "PWR": [".ptb"],
+        "TAB": [".txt"],
+        "CRD": [".txt"],
+      }
+      # Use single glob to find any existing files with the base filename
+      pattern = os.path.join(artist_folder, f"{base_filename}.*")
+      existing_files = glob.glob(pattern)
+      if len(existing_files) > 1:
+        if verbose:
+          print(f"      Warning: Multiple existing files found for tab {self.id}")
+        for ef in existing_files:
+          if (os.path.basename(ef)).split('.')[-1] not in acceptable_extensions[self.type.upper()]:
+            os.remove(ef)
+            existing_files.remove(ef)
+      existing_file = existing_files[0] if existing_files else None
       
-      # Determine file extension based on type
-      if self.type.upper() in ['PRO', 'PWR']:
-        extension = self._detect_pro_file_extension()
-      else:
-        extension = '.txt'  # Text files for regular tabs
-      
-      # Create filename with ID to ensure uniqueness
-      filename = f"{safe_title}_{safe_type}_{self.id}{extension}"
-      filepath = os.path.join(artist_folder, filename)
-      
-      # Check if file already exists and handle based on flags
-      file_exists = os.path.exists(filepath)
-      if file_exists:
-        if skip_existing:
-          if verbose:
-            print(f"      File already exists, skipping: {filename}")
-          return filepath
-        else:
-          if verbose:
-            print(f"      File already exists, overwriting: {filename}")
+      # Handle existing file based on skip_existing flag
+      if existing_file and skip_existing:
+        if verbose:
+          print(f"      File already exists, skipping: {os.path.basename(existing_file)}")
+        return existing_file
+      elif existing_file and not skip_existing:
+        if verbose:
+          print(f"      File already exists, will overwrite: {os.path.basename(existing_file)}")
       
       # Apply adaptive delay before download if delay tracker is provided
       if delay_tracker:
@@ -830,6 +837,28 @@ class Tab:
           print(f"      Failed to download tab {self.id}")
         return None
       
+      # Determine the final file path
+      if self.type.upper() in ['PRO', 'PWR']:
+        # For PRO/PWR tabs, detect extension after download
+        extension = self._detect_pro_file_extension()
+        filename = f"{base_filename}{extension}"
+        filepath = os.path.join(artist_folder, filename)
+        
+        # If we're overwriting and the extension changed, remove the old file
+        if existing_file and existing_file != filepath:
+          try:
+            os.remove(existing_file)
+            if verbose:
+              print(f"      Removed old file: {os.path.basename(existing_file)}")
+          except Exception as e:
+            if verbose:
+              print(f"      Warning: Could not remove old file {os.path.basename(existing_file)}: {e}")
+      else:
+        # Regular tabs use .txt extension
+        extension = '.txt'
+        filename = f"{base_filename}{extension}"
+        filepath = os.path.join(artist_folder, filename)
+      
       # Write content to file
       mode = 'wb' if isinstance(content, bytes) else 'w'
       encoding = None if isinstance(content, bytes) else 'utf-8'
@@ -837,11 +866,14 @@ class Tab:
       with open(filepath, mode, encoding=encoding) as f:
         f.write(content)
       
+      # Determine if we're overwriting for the action message
+      was_overwritten = existing_file is not None and not skip_existing
+      
       # Verify file was written
       if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
         if delay_tracker:
           delay_tracker.record_download(True)
-        action = "Overwritten" if file_exists and not skip_existing else "Saved"
+        action = "Overwritten" if was_overwritten else "Saved"
         if verbose:
           print(f"      {action}: {filename} ({os.path.getsize(filepath)} bytes)")
         return filepath

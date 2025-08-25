@@ -1,4 +1,4 @@
-apt-get update && apt-get install -y \
+sudo apt-get update && sudo apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
@@ -30,13 +30,13 @@ apt-get update && apt-get install -y \
 wget -q -O chrome-linux64.zip https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.157/linux64/chrome-linux64.zip && \
     unzip chrome-linux64.zip && \
     rm chrome-linux64.zip && \
-    mv chrome-linux64 /opt/chrome/ && \
-    ln -sf /opt/chrome/chrome /usr/bin/chromium
+    sudo mv chrome-linux64 /opt/chrome/ && \
+    sudo ln -sf /opt/chrome/chrome /usr/bin/chromium
 
 wget -q -O chromedriver-linux64.zip https://storage.googleapis.com/chrome-for-testing-public/138.0.7204.157/linux64/chromedriver-linux64.zip && \
     unzip -j chromedriver-linux64.zip chromedriver-linux64/chromedriver && \
     rm chromedriver-linux64.zip && \
-    mv chromedriver /usr/bin/
+    sudo mv chromedriver /usr/bin/
     
 python3 -m venv ./venv
 source ./venv/bin/activate
