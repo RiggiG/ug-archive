@@ -557,6 +557,12 @@ class Tab:
       
       response.raise_for_status()
       
+      # Check if tab has been removed by publisher
+      if "This tab has been removed at the request of the publisher" in response.text:
+        if verbose:
+          print(f"      Tab {self.id} has been removed by publisher request")
+        return None
+      
       # Validate JavaScript execution for PRO download form with retry
       validators = {
         'hasDownloadContainer': """
@@ -657,6 +663,12 @@ class Tab:
       response = session.get(tab_url, wait_for_element=wait_element, timeout=30)
       
       response.raise_for_status()
+      
+      # Check if tab has been removed by publisher
+      if "This tab has been removed at the request of the publisher" in response.text:
+        if verbose:
+          print(f"      Tab {self.id} has been removed by publisher request")
+        return None
       
       # Validate JavaScript execution for tab page with retry
       validators = {
