@@ -1110,15 +1110,16 @@ def parse_bands(start, end, session, max_bands=None, existing_bands=None):
             
             band_id = url_match.group(1)
             
-            # Skip if this band already exists and skip-existing is enabled
-            if existing_bands and band_id in existing_bands:
-              print(f"    Skipping existing band: {band_name} ({band_id})")
-              continue
             
             # Extract band name
             name_span = link.find('span')
             band_name = name_span.get_text(strip=True) if name_span else link.get_text(strip=True)
             band_name = band_name.replace('Tabs', '').strip()  # Clean up name
+            
+            # Skip if this band already exists and skip-existing is enabled
+            if existing_bands and band_id in existing_bands:
+              print(f"    Skipping existing band: {band_name} ({band_id})")
+              continue
             
             # Create full URL
             full_url = urljoin('https://www.ultimate-guitar.com', band_url)
