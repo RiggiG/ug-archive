@@ -1104,7 +1104,7 @@ def parse_bands(start, end, session, max_bands=None, existing_bands=None):
             
             # Extract band ID from URL (e.g., /artist/64300 -> 64300)
             #url_match = re.search(r'\/artist\/\w*?(\d+)', band_url)
-            url_match = re.search(r'\/artist\/\w*?(\d+)$', band_url)
+            url_match = re.search(r'\/artist\/.*?(\d+)$', band_url)
             if not url_match:
               continue
             
