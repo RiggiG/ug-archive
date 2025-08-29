@@ -808,7 +808,7 @@ class Tab:
       safe_type = self._sanitize_filename(self.type)
       base_filename = f"{safe_title}_{safe_type}_{self.id}"
       acceptable_extensions = {
-        "PRO": [".gp3", ".gp4", ".gp5", ".gp6", ".gp7", ".gpx", ".tg"],
+        "PRO": [".gp3", ".gp4", ".gp6", ".gp7", ".gpx", ".tg"], # temporarily lacking .gp5 because a change resulted in .gp5 being used for all PRO
         "PWR": [".ptb"],
         "TAB": [".txt"],
         "CRD": [".txt"],
@@ -819,10 +819,10 @@ class Tab:
       if len(existing_files) > 1:
         if verbose:
           print(f"      Warning: Multiple existing files found for tab {self.id}")
-        for ef in existing_files:
-          if (os.path.basename(ef)).split('.')[-1] not in acceptable_extensions[self.type.upper()]:
-            os.remove(ef)
-            existing_files.remove(ef)
+      for ef in existing_files:
+        if (os.path.basename(ef)).split('.')[-1] not in acceptable_extensions[self.type.upper()]:
+          os.remove(ef)
+          existing_files.remove(ef)
       existing_file = existing_files[0] if existing_files else None
       
       # Handle existing file based on skip_existing flag
@@ -925,7 +925,7 @@ class Tab:
       if 'filename=' in content_disposition:
         # Extract filename from header like: attachment; filename="song.gp5"
         import re
-        filename_match = re.search(r'filename[="]([^"]+)', content_disposition)
+        filename_match = re.search(r'filename="([^"]*)"', content_disposition)
         if filename_match:
           filename = filename_match.group(1)
           _, ext = os.path.splitext(filename)
