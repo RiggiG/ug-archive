@@ -20,6 +20,15 @@ import time
 import random
 import functools
 import threading
+import subprocess
+import traceback
+try:
+    import undetected_chromedriver as uc
+    USE_UNDETECTED_CHROMEDRIVER = True
+except ImportError:
+    USE_UNDETECTED_CHROMEDRIVER = False
+    print("Warning: undetected-chromedriver not found. Install it with 'pip install undetected-chromedriver' for better Cloudflare bypass.")
+
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -288,9 +297,11 @@ def validate_js_loading(session, validators, retry_config=None):
     return _validate()
 
 class SeleniumSession:
-  def __init__(self, user_agent=None, headless=True):
+  def __init__(self, user_agent=None, headless=True, user_data_dir=None, use_undetected=False):
     self.user_agent = user_agent or 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36'
     self.headless = headless
+    self.user_data_dir = user_data_dir
+    self.use_undetected = use_undetected and USE_UNDETECTED_CHROMEDRIVER
     self.driver = None
     self._setup_driver()
     
@@ -302,6 +313,9 @@ class SeleniumSession:
     # Mobile emulation for mobile site
     chrome_options.add_argument("--user-agent=" + self.user_agent)
     chrome_options.add_argument("--window-size=915,412")  # Mobile viewport, landscape
+    
+    if self.user_data_dir:
+      chrome_options.add_argument(f"--user-data-dir={self.user_data_dir}")
     
     # Essential Docker/container options - always apply these in containers
     if os.environ.get('RUNNING_IN_CONTAINER'):
@@ -345,22 +359,43 @@ class SeleniumSession:
       chrome_options.binary_location = chrome_binary
     
     try:
-      # Debug logging for container mode
-      if os.environ.get('RUNNING_IN_CONTAINER'):
-        print("Running in container mode - additional Chrome options applied")
-        print(f"Chrome binary: {chrome_options.binary_location}")
-        print(f"Chrome arguments: {chrome_options.arguments}")
-      
-      # Try to use system ChromeDriver first
-      chromedriver_path = os.environ.get('CHROMEDRIVER_PATH')
-      if chromedriver_path and os.path.exists(chromedriver_path):
-        print(f"Using ChromeDriver at: {chromedriver_path}")
-        from selenium.webdriver.chrome.service import Service
-        service = Service(chromedriver_path)
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+      if self.use_undetected:
+        print("Initializing undetected-chromedriver...")
+        # undetected-chromedriver handles options differently
+        # It doesn't support all standard Selenium options directly in the same way
+        # but we can pass the ChromeOptions object
+        
+        # Note: uc.Chrome doesn't support 'binary_location' in options, 
+        # it has a separate 'browser_executable_path' argument
+        browser_executable_path = chrome_binary if chrome_binary else None
+        driver_executable_path = os.environ.get('CHROMEDRIVER_PATH')
+        
+        self.driver = uc.Chrome(
+          options=chrome_options,
+          headless=self.headless,
+          browser_executable_path=browser_executable_path,
+          driver_executable_path=driver_executable_path,
+          use_subprocess=True
+        )
+        print("undetected-chromedriver initialized successfully")
       else:
-        print("Using default ChromeDriver from PATH")
-        self.driver = webdriver.Chrome(options=chrome_options)
+        # Standard Selenium initialization
+        # Debug logging for container mode
+        if os.environ.get('RUNNING_IN_CONTAINER'):
+          print("Running in container mode - additional Chrome options applied")
+          print(f"Chrome binary: {chrome_options.binary_location}")
+          print(f"Chrome arguments: {chrome_options.arguments}")
+        
+        # Try to use system ChromeDriver first
+        chromedriver_path = os.environ.get('CHROMEDRIVER_PATH')
+        if chromedriver_path and os.path.exists(chromedriver_path):
+          print(f"Using ChromeDriver at: {chromedriver_path}")
+          from selenium.webdriver.chrome.service import Service
+          service = Service(chromedriver_path)
+          self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        else:
+          print("Using default ChromeDriver from PATH")
+          self.driver = webdriver.Chrome(options=chrome_options)
       
       self.driver.implicitly_wait(10)  # 10 second implicit wait
       print("WebDriver initialized successfully")
@@ -1257,7 +1292,7 @@ def download_band_tabs(band, session, base_outdir, include_metadata=False, skip_
   }
 
 
-def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True, progress_callback=None, delay_tracker=None):
+def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_types, include_metadata, thread_id, skip_existing=True, progress_callback=None, delay_tracker=None, browser_config=None):
   """
   Process a chunk of band files in a single thread.
   Each thread gets its own Selenium session to avoid conflicts.
@@ -1272,9 +1307,17 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
     skip_existing: Skip download if file already exists
     progress_callback: Function to call for progress updates
     delay_tracker: AdaptiveDelayTracker instance for failure rate tracking
+    browser_config: Dictionary containing browser configuration (headless, user_data_dir, etc.)
   """
   # Create a separate Selenium session for this thread
-  session = SeleniumSession()
+  if browser_config:
+    session = SeleniumSession(
+      headless=browser_config.get('headless', True),
+      user_data_dir=browser_config.get('user_data_dir'),
+      use_undetected=browser_config.get('use_undetected', False)
+    )
+  else:
+    session = SeleniumSession()
   
   try:
     thread_stats = {
@@ -1356,7 +1399,7 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
       print(f"Thread {thread_id}: Error closing session: {e}")
 
 
-def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False, num_threads=1, starting_letter='0-9', end_letter='z', skip_existing=True, disable_adaptive_delay=False):
+def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False, num_threads=1, starting_letter='0-9', end_letter='z', skip_existing=True, disable_adaptive_delay=False, browser_config=None):
   '''
   Process existing local artist JSON files to download tabs without scraping.
   This allows downloading tabs from previously scraped metadata.
@@ -1375,6 +1418,7 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
     end_letter (str): Ending letter/category for band filtering
     skip_existing (bool): Skip download if file already exists
     disable_adaptive_delay (bool): Disable adaptive delay tracking for failure rate management
+    browser_config (dict): Browser configuration for threaded sessions
   '''
   if not os.path.exists(local_files_dir):
     print(f"Error: Local files directory does not exist: {local_files_dir}")
@@ -1534,7 +1578,8 @@ def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_pe
           i + 1,
           skip_existing,
           progress_callback,
-          delay_tracker  # Pass shared delay tracker to all threads
+          delay_tracker,  # Pass shared delay tracker to all threads
+          browser_config  # Pass browser configuration
         ): i + 1 
         for i, chunk in enumerate(band_chunks)
       }
@@ -1947,6 +1992,11 @@ def main():
   parser.add_argument('--skip-existing-tabs', dest='skip_existing_tabs', action='store_true', default=True, help='Skip downloading tabs if file already exists on disk (default: True)')
   parser.add_argument('--overwrite-existing-tabs', dest='skip_existing_tabs', action='store_false', help='Overwrite existing tab files on disk (opposite of --skip-existing-tabs)')
   
+  # Browser configuration
+  parser.add_argument('--show-browser', action='store_true', help='Run browser in headful mode (visible) to allow manual captcha solving')
+  parser.add_argument('--user-data-dir', type=str, default=None, help='Path to Chrome user data directory to persist session/cookies')
+  parser.add_argument('--disable-undetected-chromedriver', action='store_true', help='Disable undetected-chromedriver even if available')
+  
   # Legacy compatibility
   parser.add_argument('--skip-downloads', action='store_true', help='Legacy: same as --scrape-only (for backward compatibility)')
   
@@ -2009,7 +2059,11 @@ def main():
     print("Adaptive delay tracking only active in multi-threaded mode")
 
   # Setup Selenium session
-  session = SeleniumSession()
+  session = SeleniumSession(
+      headless=not args.show_browser,
+      user_data_dir=args.user_data_dir,
+      use_undetected=not args.disable_undetected_chromedriver
+  )
   bands = {}  # Initialize bands dictionary for cleanup
   
   try:
@@ -2035,7 +2089,14 @@ def main():
       else:
         print("Tab file handling: Skip existing files")
       
-      process_local_artist_files(args.local_files_dir, args.outdir, session, args.max_tabs_per_band, args.max_bands, args.tab_types, args.include_metadata, args.threads, args.starting_letter, args.end_letter, args.skip_existing_tabs, args.disable_adaptive_delay)
+      # Create browser config for threaded sessions
+      browser_config = {
+        'headless': not args.show_browser,
+        'user_data_dir': args.user_data_dir,
+        'use_undetected': not args.disable_undetected_chromedriver
+      }
+      
+      process_local_artist_files(args.local_files_dir, args.outdir, session, args.max_tabs_per_band, args.max_bands, args.tab_types, args.include_metadata, args.threads, args.starting_letter, args.end_letter, args.skip_existing_tabs, args.disable_adaptive_delay, browser_config)
       
     else:
       # Scraping mode (with or without downloads)
