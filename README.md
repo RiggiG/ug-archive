@@ -32,6 +32,44 @@ Docker container for that use case.
 | `--threads` | `1` | Number of parallel threads for download-only mode |
 | `--skip-existing-tabs` | `True` | Skip downloading tabs if file already exists |
 | `--overwrite-existing-tabs` | N/A | Overwrite existing tab files (opposite of --skip-existing-tabs) |
+| `--show-browser` | `False` | Run browser in headful mode (visible) for manual interaction |
+| `--user-data-dir` | `None` | Path to Chrome user data directory to persist session/cookies |
+| `--disable-undetected-chromedriver` | `False` | Disable undetected-chromedriver (if installed) |
+
+## Cloudflare Mitigation
+
+The scraper automatically uses `undetected-chromedriver` if available to bypass Cloudflare protection. However, if you still encounter blocking, you can use the following workflow to manually solve captchas and persist the session.
+
+### Session Persistence Workflow
+
+1. **Run on Desktop (Headful Mode)**
+   Launch the scraper with a visible browser and a persistent user data directory.
+   ```bash
+   python main.py --show-browser --user-data-dir ./chrome_profile --scrape-only --max-bands 1
+   ```
+
+2. **Solve Captcha**
+   When the browser opens, manually solve any Cloudflare challenges that appear.
+
+3. **Stop Script**
+   Once the page loads successfully, you can stop the script (Ctrl+C). The session cookies are now saved in `./chrome_profile`.
+
+4. **Run in Docker (Headless)**
+   Mount the profile directory into the container and run the scraper.
+   ```bash
+   docker run --rm \
+     -v $(pwd)/output:/app/output \
+     -v $(pwd)/chrome_profile:/app/chrome_profile \
+     riggi/ug-archive \
+     python main.py --user-data-dir /app/chrome_profile --outdir /app/output
+   ```
+
+### Multi-threading with Persistent Sessions
+
+If you use `--threads > 1` along with `--user-data-dir`, the script will automatically handle session safety:
+
+*   **Headful Mode (`--show-browser`)**: Multi-threading is disabled. The script forces `--threads 1` to avoid opening multiple visible windows.
+*   **Headless Mode**: The script creates a **temporary copy** of your Chrome profile for each thread. This allows high-speed parallel scraping using your saved session (cookies/login) without file locking conflicts. The temporary copies are deleted when the thread finishes.
 
 ## Environment Setup
 

@@ -6,6 +6,8 @@ It uses Selenium WebDriver to handle HTTP requests with JavaScript rendering and
 '''
 import argparse
 import glob
+import shutil
+import tempfile
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -20,8 +22,6 @@ import time
 import random
 import functools
 import threading
-import subprocess
-import traceback
 try:
     import undetected_chromedriver as uc
     USE_UNDETECTED_CHROMEDRIVER = True
@@ -35,6 +35,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BANDS = ['0-9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 SKIP_TAB_TYPES = ['OFFICIAL', 'VID']
+
 # Retry configuration
 DEFAULT_RETRY_CONFIG = {
     'max_attempts': 3,
@@ -1309,11 +1310,30 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
     delay_tracker: AdaptiveDelayTracker instance for failure rate tracking
     browser_config: Dictionary containing browser configuration (headless, user_data_dir, etc.)
   """
+  # Handle user_data_dir duplication for threads
+  temp_user_data_dir = None
+  
+  if browser_config and browser_config.get('user_data_dir'):
+    original_user_data_dir = browser_config.get('user_data_dir')
+    if os.path.exists(original_user_data_dir):
+      try:
+        # Create a unique temp directory for this thread
+        temp_dir = tempfile.mkdtemp(prefix=f"ug_chrome_profile_thread_{thread_id}_")
+        print(f"Thread {thread_id}: Copying Chrome profile to temporary location: {temp_dir}")
+        
+        # Copy the profile, ignoring lock files
+        shutil.copytree(original_user_data_dir, temp_dir, dirs_exist_ok=True, 
+                        ignore=shutil.ignore_patterns('Lock', 'SingletonLock', 'SingletonSocket'))
+        
+        temp_user_data_dir = temp_dir
+      except Exception as e:
+        print(f"Thread {thread_id}: Error copying profile: {e}. Falling back to original (might fail due to locking).")
+
   # Create a separate Selenium session for this thread
   if browser_config:
     session = SeleniumSession(
       headless=browser_config.get('headless', True),
-      user_data_dir=browser_config.get('user_data_dir'),
+      user_data_dir=temp_user_data_dir if temp_user_data_dir else browser_config.get('user_data_dir'),
       use_undetected=browser_config.get('use_undetected', False)
     )
   else:
@@ -1397,6 +1417,14 @@ def process_band_chunk(band_files_chunk, output_dir, max_tabs_per_band, allowed_
       session.close()
     except Exception as e:
       print(f"Thread {thread_id}: Error closing session: {e}")
+      
+    # Clean up temp directory
+    if temp_user_data_dir and os.path.exists(temp_user_data_dir):
+      try:
+        print(f"Thread {thread_id}: Cleaning up temporary profile: {temp_user_data_dir}")
+        shutil.rmtree(temp_user_data_dir)
+      except Exception as e:
+        print(f"Thread {thread_id}: Error cleaning up temp profile: {e}")
 
 
 def process_local_artist_files(local_files_dir, output_dir, session, max_tabs_per_band=None, max_bands=None, allowed_types=None, include_metadata=False, num_threads=1, starting_letter='0-9', end_letter='z', skip_existing=True, disable_adaptive_delay=False, browser_config=None):
@@ -2021,6 +2049,16 @@ def main():
   
   if args.threads > 1 and not args.download_only:
     print("Warning: --threads only applies to download-only mode, ignoring for scraping mode")
+
+  # Check for thread safety with headful mode
+  if args.threads > 1 and args.show_browser:
+    print("Warning: --show-browser is not compatible with --threads > 1 (cannot open multiple visible windows reliably).")
+    print("Switching to single-threaded mode.")
+    args.threads = 1
+
+  # Note about user-data-dir duplication
+  if args.threads > 1 and args.user_data_dir:
+    print(f"Note: Using --user-data-dir with {args.threads} threads. Each thread will use a temporary copy of the profile.")
 
   # Configure global retry settings
   global DEFAULT_RETRY_CONFIG
